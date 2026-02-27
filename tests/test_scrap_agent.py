@@ -9,8 +9,8 @@ def _make_agent(tmp_path, monkeypatch):
     agent = ScrapAgent()
     agent.state_controller = StateController(str(tmp_path / "agent_state.json"))
 
-    async def fake_decompose_targets(topic, research_context, extra_hints, model_name):
-        return [f"{topic} target A", f"{topic} target B", f"{topic} target C"]
+    async def fake_decompose_query_to_targets(source_query, research_context, extra_hints, model_name):
+        return [f"{source_query} target A", f"{source_query} target B", f"{source_query} target C"]
 
     async def fake_scrape_urls(urls):
         return [
@@ -22,7 +22,7 @@ def _make_agent(tmp_path, monkeypatch):
             for url in urls
         ]
 
-    monkeypatch.setattr(agent, "_decompose_targets", fake_decompose_targets)
+    monkeypatch.setattr(agent, "_decompose_query_to_targets", fake_decompose_query_to_targets)
     monkeypatch.setattr(agent, "_scrape_urls", fake_scrape_urls)
     return agent
 
@@ -150,10 +150,33 @@ async def test_output_contract_prd_json(tmp_path, monkeypatch):
     result = await agent.run_depth_scrap({"task": {}, "topic": "AI export control", "research_context": {}})
     packet = result["scrap_packet"]
 
-    assert {"iteration_index", "model_level", "active_engines", "search_log"} <= set(packet.keys())
+    assert {
+        "iteration_index",
+        "model_level",
+        "active_engines",
+        "search_log",
+        "query_target_map",
+        "coverage_snapshot",
+        "fallback_used",
+    } <= set(packet.keys())
     assert isinstance(packet["search_log"], list)
     assert "confidence_score" not in packet
     assert "truthfulness_rating" not in packet
+
+
+def test_validate_and_filter_targets_discards_out_of_scope(tmp_path, monkeypatch):
+    agent = _make_agent(tmp_path, monkeypatch)
+    result = agent._validate_and_filter_targets(
+        source_query="nvidia ai gpu revenue 2026",
+        candidate_targets=[
+            "nvidia ai gpu revenue actual audited 2026 filing",
+            "medieval poetry translation methods in europe",
+        ],
+        research_context={"description": "focus on audited annual revenue", "key_points": ["actual value"]},
+    )
+    assert len(result["kept"]) >= 1
+    discarded_targets = [item["target"] for item in result["discarded"]]
+    assert "medieval poetry translation methods in europe" in discarded_targets
 
 
 @pytest.mark.asyncio

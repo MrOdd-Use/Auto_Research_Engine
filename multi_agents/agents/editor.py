@@ -1,5 +1,6 @@
 from datetime import datetime
 import asyncio
+import logging
 import re
 import os
 from types import SimpleNamespace
@@ -367,6 +368,15 @@ Return valid JSON only (no markdown fences) with this exact shape:
         extra_hints: Optional[str],
     ) -> Dict[str, Any]:
         """Create the input for a single research task with enriched context."""
+        research_queries = self._normalize_research_queries(
+            section_detail.get("research_queries")
+        )
+        planning_incomplete = len(research_queries) == 0
+        if planning_incomplete:
+            logging.getLogger(__name__).warning(
+                "Planning incomplete for section '%s': missing research_queries.",
+                section_detail.get("header"),
+            )
         return {
             "task": research_state.get("task"),
             "topic": section_detail["header"],
@@ -374,7 +384,9 @@ Return valid JSON only (no markdown fences) with this exact shape:
             "research_context": {
                 "description": section_detail.get("description", ""),
                 "key_points": section_detail.get("key_points", []),
-                "research_queries": section_detail.get("research_queries", []),
+                "research_queries": research_queries,
+                "planning_incomplete": planning_incomplete,
+                "planning_issue": "missing_research_queries" if planning_incomplete else "",
             },
             "title": title,
             "audit_feedback": audit_feedback,
@@ -464,3 +476,20 @@ Return valid JSON only (no markdown fences) with this exact shape:
         text = value.strip().strip("-*").strip()
         text = re.sub(r"\s+", " ", text)
         return text
+
+    def _normalize_research_queries(self, research_queries: Any) -> List[str]:
+        """Normalize planner research queries for downstream deterministic use."""
+        if not isinstance(research_queries, list):
+            return []
+        normalized: List[str] = []
+        seen = set()
+        for item in research_queries:
+            cleaned = self._clean_text(item)
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(cleaned)
+        return normalized

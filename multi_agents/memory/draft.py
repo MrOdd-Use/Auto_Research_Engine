@@ -11,6 +11,8 @@ class DraftState(TypedDict):
     check_data_action: str
     check_data_verdict: Optional[dict]
     scrap_packet: Optional[dict]
+    coverage_metrics: Optional[dict]
+    query_target_map: Optional[list]
     draft: dict
     review: str
     revision_notes: str

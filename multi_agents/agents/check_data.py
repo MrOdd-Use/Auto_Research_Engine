@@ -17,6 +17,8 @@ class CheckDataAgent:
     }
     MAX_RETRIES = 3
     PASS_THRESHOLD = 0.7
+    COVERAGE_THRESHOLD = 0.7
+    DEFAULT_RETRY_BUDGET = 1
     SUSPICIOUS_TOKENS = {
         "projection",
         "projected",
@@ -52,6 +54,8 @@ class CheckDataAgent:
         scrap_packet = draft_state.get("scrap_packet") or {}
         iteration_index = self._normalize_iteration(draft_state.get("iteration_index"))
         max_retries = self._normalize_max_retries(task.get("check_data_max_retries"))
+        coverage_report = self._build_coverage_report(scrap_packet, research_context)
+        coverage_failed = float(coverage_report.get("section_coverage") or 0.0) < self.COVERAGE_THRESHOLD
 
         await self._emit_log(
             "check_data_start",
@@ -74,14 +78,22 @@ class CheckDataAgent:
                 hard_fail=hard_fail,
                 iteration_index=iteration_index,
                 max_retries=max_retries,
+                coverage_failed=coverage_failed,
             )
-            feedback_packet = self._build_feedback_packet(topic, claims, precheck, deep_eval_report)
+            feedback_packet = self._build_feedback_packet(
+                topic,
+                claims,
+                precheck,
+                deep_eval_report,
+                coverage_report,
+            )
             verdict = {
                 "status": status,
                 "deep_eval_report": deep_eval_report,
                 "feedback_packet": feedback_packet,
                 "atomic_claims": claims,
                 "guard_report": precheck,
+                "coverage_report": coverage_report,
             }
 
             if status == "ACCEPT":
@@ -95,6 +107,7 @@ class CheckDataAgent:
                     "audit_feedback": {
                         "is_satisfied": True,
                         "confidence_score": final_score,
+                        "section_coverage": coverage_report.get("section_coverage"),
                     },
                     "iteration_index": iteration_index,
                     "extra_hints": None,
@@ -115,6 +128,8 @@ class CheckDataAgent:
                         "confidence_score": final_score,
                         "instruction": feedback_packet.get("instruction"),
                         "new_query_suggestion": feedback_packet.get("new_query_suggestion"),
+                        "uncovered_queries": coverage_report.get("uncovered_queries") or [],
+                        "section_coverage": coverage_report.get("section_coverage"),
                     },
                     "iteration_index": next_iteration,
                     "extra_hints": retry_hints,
@@ -133,6 +148,8 @@ class CheckDataAgent:
                     "confidence_score": final_score,
                     "instruction": feedback_packet.get("instruction"),
                     "new_query_suggestion": feedback_packet.get("new_query_suggestion"),
+                    "uncovered_queries": coverage_report.get("uncovered_queries") or [],
+                    "section_coverage": coverage_report.get("section_coverage"),
                 },
                 "draft": {topic: placeholder},
                 "review": None,
@@ -150,10 +167,13 @@ class CheckDataAgent:
         return min(max(parsed, 1), self.MAX_RETRIES)
 
     def _normalize_max_retries(self, value: Any) -> int:
+        if value is None:
+            parsed = self.DEFAULT_RETRY_BUDGET + 1
+            return min(max(parsed, 1), self.MAX_RETRIES)
         try:
             parsed = int(value)
         except (TypeError, ValueError):
-            parsed = self.MAX_RETRIES
+            parsed = self.DEFAULT_RETRY_BUDGET + 1
         return min(max(parsed, 1), self.MAX_RETRIES)
 
     def _extract_segments(self, scrap_packet: dict) -> List[str]:
@@ -310,14 +330,32 @@ class CheckDataAgent:
             "verdict": verdict,
         }
 
-    def _resolve_status(self, final_score: float, hard_fail: bool, iteration_index: int, max_retries: int) -> str:
+    def _resolve_status(
+        self,
+        final_score: float,
+        hard_fail: bool,
+        iteration_index: int,
+        max_retries: int,
+        coverage_failed: bool,
+    ) -> str:
+        if coverage_failed:
+            if iteration_index < max_retries:
+                return "RETRY"
+            return "BLOCKED"
         if final_score >= self.PASS_THRESHOLD and not hard_fail:
             return "ACCEPT"
         if iteration_index < max_retries:
             return "RETRY"
         return "BLOCKED"
 
-    def _build_feedback_packet(self, topic: str, claims: dict, precheck: dict, deep_eval_report: dict) -> dict:
+    def _build_feedback_packet(
+        self,
+        topic: str,
+        claims: dict,
+        precheck: dict,
+        deep_eval_report: dict,
+        coverage_report: dict,
+    ) -> dict:
         failed_claims = deep_eval_report.get("failed_claims") or []
         missing_clauses = []
 
@@ -327,6 +365,10 @@ class CheckDataAgent:
             missing_clauses.append("focus strictly on the target entity")
         if precheck.get("suspicious"):
             missing_clauses.append("exclude projection/forecast language and require actual or audited values")
+        if float(coverage_report.get("section_coverage") or 0.0) < self.COVERAGE_THRESHOLD:
+            missing_clauses.append(
+                f"increase section evidence coverage to at least {self.COVERAGE_THRESHOLD:.2f}"
+            )
 
         subject = str(claims.get("subject") or "").strip()
         time_constraint = str(claims.get("time_constraint") or "").strip()
@@ -348,20 +390,28 @@ class CheckDataAgent:
         if not missing_clauses:
             missing_clauses.append("improve relevance and evidence quality")
 
+        uncovered_queries = coverage_report.get("uncovered_queries") or []
+        if uncovered_queries:
+            query = f"{query} {' '.join(uncovered_queries[:2])}".strip()
+
         return {
             "instruction": "Previous results are insufficient: " + "; ".join(missing_clauses) + ".",
             "new_query_suggestion": query,
             "failed_claims": failed_claims,
+            "uncovered_queries": uncovered_queries,
         }
 
     def _merge_retry_hints(self, feedback_packet: dict) -> str:
         parts = []
         instruction = str(feedback_packet.get("instruction") or "").strip()
         suggestion = str(feedback_packet.get("new_query_suggestion") or "").strip()
+        uncovered_queries = feedback_packet.get("uncovered_queries") or []
         if instruction:
             parts.append(instruction)
         if suggestion:
             parts.append(f"Search expression: {suggestion}")
+        if uncovered_queries:
+            parts.append(f"Prioritize unresolved queries: {', '.join(uncovered_queries[:3])}")
         return " ; ".join(parts)
 
     def _blocked_placeholder(self, topic: str, deep_eval_report: dict, feedback_packet: dict) -> str:
@@ -394,3 +444,72 @@ class CheckDataAgent:
         occurrences = corpus.count(subject)
         words = max(len(corpus.split()), 1)
         return round((occurrences / words) * 100, 4)
+
+    def _build_coverage_report(self, scrap_packet: dict, research_context: dict) -> dict:
+        snapshot = scrap_packet.get("coverage_snapshot")
+        if isinstance(snapshot, dict):
+            query_coverage = float(snapshot.get("query_coverage") or 0.0)
+            keypoint_coverage = float(snapshot.get("keypoint_coverage") or 0.0)
+            section_coverage = float(snapshot.get("section_coverage") or min(query_coverage, keypoint_coverage))
+            query_total = int(snapshot.get("query_total") or 0)
+            keypoint_total = int(snapshot.get("keypoint_total") or 0)
+            if query_total == 0 and keypoint_total == 0:
+                query_coverage = 1.0
+                keypoint_coverage = 1.0
+                section_coverage = 1.0
+            return {
+                "query_coverage": round(query_coverage, 4),
+                "keypoint_coverage": round(keypoint_coverage, 4),
+                "section_coverage": round(section_coverage, 4),
+                "uncovered_queries": snapshot.get("uncovered_queries") or [],
+                "uncovered_key_points": snapshot.get("uncovered_key_points") or [],
+                "coverage_threshold": float(snapshot.get("coverage_threshold") or self.COVERAGE_THRESHOLD),
+            }
+
+        source_queries = [
+            str(item or "").strip()
+            for item in (research_context.get("research_queries") or [])
+            if str(item or "").strip()
+        ]
+        key_points = [
+            str(item or "").strip()
+            for item in (research_context.get("key_points") or [])
+            if str(item or "").strip()
+        ]
+        search_log = scrap_packet.get("search_log") or []
+        covered_queries_set = set()
+        corpus = []
+        for row in search_log:
+            source_query = str(row.get("source_query") or "").strip()
+            passages = row.get("top_10_passages") or []
+            if source_query and passages:
+                covered_queries_set.add(source_query)
+            corpus.append(str(row.get("target") or ""))
+            for passage in passages:
+                corpus.append(str(passage.get("content") or ""))
+        corpus_text = " ".join(corpus).lower()
+
+        query_total = len(source_queries)
+        query_covered = sum(1 for query in source_queries if query in covered_queries_set)
+        query_coverage = (query_covered / query_total) if query_total else 0.0
+
+        if not key_points:
+            keypoint_coverage = 1.0
+            uncovered_key_points = []
+        else:
+            uncovered_key_points = [point for point in key_points if point.lower() not in corpus_text]
+            keypoint_coverage = (len(key_points) - len(uncovered_key_points)) / len(key_points)
+
+        if query_total == 0 and len(key_points) == 0:
+            query_coverage = 1.0
+            keypoint_coverage = 1.0
+        section_coverage = min(query_coverage, keypoint_coverage)
+        uncovered_queries = [query for query in source_queries if query not in covered_queries_set]
+        return {
+            "query_coverage": round(query_coverage, 4),
+            "keypoint_coverage": round(keypoint_coverage, 4),
+            "section_coverage": round(section_coverage, 4),
+            "uncovered_queries": uncovered_queries,
+            "uncovered_key_points": uncovered_key_points,
+            "coverage_threshold": self.COVERAGE_THRESHOLD,
+        }

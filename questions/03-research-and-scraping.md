@@ -7,7 +7,7 @@
 **标准答案（可直接说）：**
 一句话：Tool-use 是调用外部能力（搜索/抓取）；RAG 是把外部证据注入上下文；Web Research 是面向互联网证据的 RAG/Tool-use 组合。本项目通过“证据采集 + 校验 gate + 引用输出约束 + 评测”来做 grounding。
 
-展开：研究阶段会通过检索器拿到候选 URL，再抓取正文形成证据语料，经过去重与重排后进入写作/总结。多智能体链路里，Check Data 作为 gate 用硬约束（主体/时间/指标等）评估证据是否匹配，决定 ACCEPT/RETRY/BLOCKED，避免“证据不足仍强行生成”。离线 hallucination eval 则把输出与 source text 做对齐式评估，作为质量信号。
+展开：研究阶段会通过检索器拿到候选 URL，再抓取正文形成证据语料，经过去重与重排后进入写作/总结。除传统 web 搜索外，本项目也支持通过 MCP（Model Context Protocol）把“外部工具/数据源”以统一协议接入检索链路（例如内部知识系统/数据库/本地工具），并将工具返回标准化成与 web 搜索一致的结果结构供后续复用（见 `questions/07-mcp-integration.md`）。多智能体链路里，Check Data 作为 gate 用硬约束（主体/时间/指标等）评估证据是否匹配，决定 ACCEPT/RETRY/BLOCKED，避免“证据不足仍强行生成”。离线 hallucination eval 则把输出与 source text 做对齐式评估，作为质量信号。
 
 常见坑/反杀点：
 - grounding 不是“加链接就行”；真正难点是断言是否被证据支持。
@@ -16,6 +16,8 @@
 **相关模块（对应实现）：**
 - gpt_researcher/actions/query_processing.py
 - gpt_researcher/actions/web_scraping.py
+- gpt_researcher/retrievers/mcp/
+- gpt_researcher/mcp/
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
@@ -454,19 +456,22 @@
 - `tests/test_scrap_agent.py` 的 URL 去重用例可直接回归。
 
 ### 8) MMR 的实现细节（向量/相似度/lambda/top_k/time budget）与取舍？
-**一句话结论：** 用轻量词袋相似度做 MMR，5 秒时间预算下选出 top-10 多样且相关的证据片段。
+**一句话结论：** 证据片段重排采用“双路径 MMR”：优先走 embedding-MMR（更语义，受 time budget 与候选裁剪控制），失败/超时自动降级到词袋（BOW）MMR，确保在线链路稳定输出 top-10 多样且相关的片段。
 
 **实现落点：**
-- `multi_agents/agents/scrap.py`：`lambda_param=0.7`、`top_k=10`、`time_budget_s=5.0`；向量是词袋计数（英文 token + 中文单字），相似度是余弦。
-- 超时策略：超过时间预算会回退到按相关性补齐的排序，避免在线链路卡死。
+- `multi_agents/agents/scrap.py`：MMR 重排入口默认 `top_k=10`、`lambda_param=0.7`、`time_budget_s=5.0`；当 `SCRAP_MMR_USE_EMBEDDINGS` 启用时，优先尝试 embedding-MMR，成功就直接返回。
+- embedding-MMR 路径（可选）：会把总时间预算 `time_budget_s` 换算成“剩余时间”并用 `asyncio.wait_for(..., timeout=remaining)` 包住 embedding 调用；当 passages 过多时，用 `SCRAP_MMR_MAX_EMBED_PASSAGES`（默认 80）先基于轻量相关性粗排截断候选，再对候选做 embedding-MMR 精排。
+- 自动降级策略：embedding 初始化缺配置（embedding provider/model）或 embedding 调用异常/超时，会在本进程内关闭 embedding-MMR 路径并记录错误，后续直接走 BOW-MMR，避免反复失败拖慢热路径。
+- BOW-MMR 路径（兜底）：向量为词袋计数（英文 token + 中文单字），相似度为余弦；按 MMR 贪心策略在“相关性 vs 多样性”间折中选 top-k。若循环超过 `time_budget_s`，回退到“按相关性补齐”的兜底排序，防止在线链路卡死。
 - `tests/test_scrap_agent.py`：`test_passage_mmr_top10_diversity` 覆盖 top-10 多样性结果（不重复 content）。
 
 **为什么这样设计：**
-- 证据选择是热路径：embedding MMR 更语义但成本与依赖更高；词袋方案延迟稳定、可解释、无外部服务依赖。
+- 证据选择是热路径：embedding-MMR 在同义改写/跨语言场景更鲁棒，但成本更高且依赖 embedding 配置/调用稳定性；因此采用“能用则用 embedding，不能用就退回词袋”的分层策略，把语义收益与工程稳定性同时兼顾。
+- 候选裁剪 + time budget 是关键工程约束：保证在 evidence 数量暴涨时也能把最慢部分（embedding）限制在可控区间内。
 
 **利弊与边界：**
-- 利：快、可解释；适合在线 re-rank。
-- 弊：同义改写/跨语言语义相近时效果会退化；需要升级 embedding + 缓存（可选升级）。
+- 利：在 embedding 可用时提升语义召回与去同质化效果；在 embedding 不可用/不稳定时依然能用纯本地计算（BOW）维持稳定时延与输出契约。
+- 弊：embedding 路径依赖配置与外部调用（若用远程 embedding）；BOW 路径对同义改写/跨语言语义相近更容易退化。可选升级方向包括：embedding 结果缓存、跨轮证据缓存、以及更强的近重复检测（内容级 canonical）。
 
 **追问补充：lambda 怎么调？效果如何评估？**
 - 现状：`lambda_param` 目前是固定默认值（0.7），仓库内没有在线 A/B。

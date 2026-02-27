@@ -60,7 +60,7 @@
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：运行期通过 websocket/日志把每个阶段的事件与产物输出；同时支持 LangSmith tracing（`LANGCHAIN_TRACING_V2`、`LANGCHAIN_API_KEY`）（见 `backend/server/server_utils.py`、`docs/docs/Auto_Research_Engine/handling-logs/langsmith-logs.md`）。配置层面区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`），评测脚本也可用独立 grader 模型（见 `evals/README.md`）。
+- 实现：运行期通过 websocket/日志把每个阶段的事件与产物输出；同时支持 LangSmith tracing（`LANGCHAIN_TRACING_V2`、`LANGCHAIN_API_KEY`）（见 `backend/server/server_utils.py`、`docs/docs/gpt-researcher/handling-logs/langsmith-logs.md`）。配置层面区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`），评测脚本也可用独立 grader 模型（见 `evals/README.md`）。
 - 为什么：研究链路长、节点多；必须可观测才能定位慢点/贵点/错点，同时把“产出模型”和“评测模型”分离以减少自评偏差。
 - 利弊：利是更易调参与成本分析；弊是 tracing 带来额外开销与数据合规/隐私治理需求。
 
@@ -213,7 +213,7 @@
 **实现落点：**
 - `multi_agents/agents/state_controller.py` + `multi_agents/agent_state.json`：保存每个 agent 的 tiers 与当前档位；scrap/check_data 会按轮次调用 tier 切换（见 `multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`）。
 - `gpt_researcher/config/config.py`：单体研究侧区分 fast/smart/strategic LLM，并支持 `REASONING_EFFORT` 等配置。
-- tracing：LangSmith 通过 `LANGCHAIN_TRACING_V2` 与 `LANGCHAIN_API_KEY`（见 `docs/docs/Auto_Research_Engine/handling-logs/langsmith-logs.md`、`backend/server/server_utils.py`）。
+- tracing：LangSmith 通过 `LANGCHAIN_TRACING_V2` 与 `LANGCHAIN_API_KEY`（见 `docs/docs/gpt-researcher/handling-logs/langsmith-logs.md`、`backend/server/server_utils.py`）。
 - evals：`evals/simple_evals`（短事实性回归）与 `evals/hallucination_eval`（长文对 sources 对照）（见 `evals/README.md`）。
 
 **为什么这样设计：**

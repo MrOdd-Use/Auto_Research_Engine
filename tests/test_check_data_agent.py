@@ -31,6 +31,40 @@ def _packet_with_text(text: str) -> dict:
     }
 
 
+def _packet_with_coverage(text: str, section_coverage: float, uncovered_queries=None) -> dict:
+    return {
+        "iteration_index": 1,
+        "model_level": "Level_1_Base",
+        "active_engines": ["tavily"],
+        "search_log": [
+            {
+                "source_query": "nvidia 2026 ai gpu revenue audited",
+                "target": "nvidia 2026 audited ai gpu revenue",
+                "extra_hints_applied": "",
+                "top_10_passages": [
+                    {
+                        "content": text,
+                        "source_url": "https://example.com/source",
+                        "metadata": {},
+                    }
+                ],
+            }
+        ],
+        "coverage_snapshot": {
+            "query_coverage": section_coverage,
+            "keypoint_coverage": section_coverage,
+            "section_coverage": section_coverage,
+            "query_total": 1,
+            "query_covered": 1 if section_coverage >= 0.7 else 0,
+            "uncovered_queries": uncovered_queries or ([] if section_coverage >= 0.7 else ["nvidia 2026 ai gpu revenue audited"]),
+            "keypoint_total": 1,
+            "keypoint_covered": 1 if section_coverage >= 0.7 else 0,
+            "uncovered_key_points": [] if section_coverage >= 0.7 else ["audited revenue"],
+            "coverage_threshold": 0.7,
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_check_data_retry_when_constraints_missing(tmp_path):
     agent = _make_agent(tmp_path)
@@ -112,3 +146,44 @@ async def test_retry_feedback_is_propagated_as_extra_hints(tmp_path):
     assert packet["new_query_suggestion"] in result["extra_hints"]
     assert result["audit_feedback"]["instruction"] == packet["instruction"]
     assert result["audit_feedback"]["new_query_suggestion"] == packet["new_query_suggestion"]
+
+
+@pytest.mark.asyncio
+async def test_check_data_retries_when_coverage_below_threshold(tmp_path):
+    agent = _make_agent(tmp_path)
+    result = await agent.run(
+        {
+            "task": {},
+            "topic": "2026 Nvidia AI GPU revenue",
+            "research_context": {"research_queries": ["nvidia 2026 ai gpu revenue audited"]},
+            "iteration_index": 1,
+            "scrap_packet": _packet_with_coverage(
+                text="Nvidia reported actual audited AI GPU revenue in 2026.",
+                section_coverage=0.4,
+            ),
+        }
+    )
+
+    assert result["check_data_action"] == "retry"
+    assert result["check_data_verdict"]["coverage_report"]["section_coverage"] == 0.4
+    assert result["audit_feedback"]["uncovered_queries"]
+
+
+@pytest.mark.asyncio
+async def test_check_data_blocks_when_coverage_still_low_after_retry(tmp_path):
+    agent = _make_agent(tmp_path)
+    result = await agent.run(
+        {
+            "task": {},
+            "topic": "2026 Nvidia AI GPU revenue",
+            "research_context": {"research_queries": ["nvidia 2026 ai gpu revenue audited"]},
+            "iteration_index": 2,
+            "scrap_packet": _packet_with_coverage(
+                text="Nvidia reported actual audited AI GPU revenue in 2026.",
+                section_coverage=0.5,
+            ),
+        }
+    )
+
+    assert result["check_data_action"] == "blocked"
+    assert result["check_data_verdict"]["coverage_report"]["section_coverage"] == 0.5

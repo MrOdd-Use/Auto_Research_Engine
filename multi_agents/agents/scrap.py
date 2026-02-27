@@ -43,6 +43,19 @@ class ScrapAgent:
         2: "gpt-4o",
         3: "o1-preview",
     }
+    TARGET_MIN_CHARS = 8
+    TARGET_MAX_CHARS = 180
+    TARGET_SIMILARITY_MIN = 0.25
+    TARGET_OUT_OF_CONTEXT_MAX_RATIO = 0.60
+    TARGET_NEAR_DUPLICATE_SIM = 0.92
+    COVERAGE_THRESHOLD = 0.70
+    VALIDATION_STOPWORDS = {
+        "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "at", "by", "with",
+        "is", "are", "was", "were", "be", "been", "being", "as", "that", "this", "these",
+        "those", "from", "into", "about", "vs", "versus", "than", "how", "what", "why",
+        "who", "when", "where", "which", "it", "its", "their", "our", "your",
+        "的", "了", "和", "与", "及", "在", "对", "就", "也", "或", "是", "有", "及其",
+    }
 
     def __init__(self, websocket=None, stream_output=None, tone=None, headers=None):
         self.websocket = websocket
@@ -99,17 +112,81 @@ class ScrapAgent:
                 self.state_controller.set_tier("scrap", tier_idx)
                 model_name = self._resolve_model_for_iteration(task, iteration)
                 extra_hints_applied = self._merge_extra_hints(extra_hints, audit_feedback)
-                sub_targets = await self._decompose_targets(
-                    topic=topic,
-                    research_context=research_context,
-                    extra_hints=extra_hints_applied,
-                    model_name=model_name,
+                source_queries = self._normalize_research_queries(
+                    research_context.get("research_queries")
                 )
+                uncovered_retry_queries = self._normalize_research_queries(
+                    (audit_feedback or {}).get("uncovered_queries")
+                )
+                if uncovered_retry_queries:
+                    source_queries = uncovered_retry_queries
+
+                planning_incomplete = bool(research_context.get("planning_incomplete")) or not source_queries
+                if not source_queries:
+                    fallback_source_query = topic or str(research_context.get("description") or "").strip()
+                    source_queries = [fallback_source_query] if fallback_source_query else []
+
+                target_jobs: List[dict] = []
+                query_target_map: List[dict] = []
+                fallback_used_any = False
+
+                for source_query in source_queries:
+                    candidates = await self._decompose_query_to_targets(
+                        source_query=source_query,
+                        research_context=research_context,
+                        extra_hints=extra_hints_applied,
+                        model_name=model_name,
+                    )
+                    validation = self._validate_and_filter_targets(
+                        source_query=source_query,
+                        candidate_targets=candidates,
+                        research_context=research_context,
+                    )
+                    kept_targets = list(validation.get("kept") or [])
+                    discarded_targets = list(validation.get("discarded") or [])
+                    fallback_used = False
+
+                    if not kept_targets:
+                        fallback_used = True
+                        fallback_used_any = True
+                        fallback_candidates = self._fallback_targets_from_context(
+                            source_query=source_query,
+                            research_context=research_context,
+                        )
+                        fallback_validation = self._validate_and_filter_targets(
+                            source_query=source_query,
+                            candidate_targets=fallback_candidates,
+                            research_context=research_context,
+                        )
+                        kept_targets = list(fallback_validation.get("kept") or [])
+                        discarded_targets.extend(fallback_validation.get("discarded") or [])
+
+                    unresolved = not bool(kept_targets)
+                    query_target_map.append(
+                        {
+                            "source_query": source_query,
+                            "planning_incomplete": planning_incomplete,
+                            "targets_generated": len(candidates),
+                            "targets_kept": len(kept_targets),
+                            "targets_discarded": len(discarded_targets),
+                            "candidate_targets": candidates,
+                            "kept_targets": kept_targets,
+                            "discarded_targets": discarded_targets,
+                            "fallback_used": fallback_used,
+                            "unresolved": unresolved,
+                            "validation": validation.get("coverage") or {},
+                        }
+                    )
+                    for target in kept_targets:
+                        target_jobs.append({"source_query": source_query, "target": target})
+
                 engines = self._select_engines(iteration, topic)
                 search_log = []
                 active_engines = set()
 
-                for target in sub_targets:
+                for job in target_jobs:
+                    source_query = job["source_query"]
+                    target = job["target"]
                     target_results, used_engines = await self._collect_results_for_target(
                         target=target,
                         engines=engines,
@@ -126,17 +203,27 @@ class ScrapAgent:
                     )
                     search_log.append(
                         {
+                            "source_query": source_query,
                             "target": target,
                             "extra_hints_applied": extra_hints_applied,
                             "top_10_passages": top_passages,
                         }
                     )
 
+                coverage_snapshot = self._build_coverage_snapshot(
+                    query_target_map=query_target_map,
+                    search_log=search_log,
+                    research_context=research_context,
+                )
+
                 packet = {
                     "iteration_index": iteration,
                     "model_level": self.ROUND_TO_LEVEL.get(iteration, "Level_1_Base"),
                     "active_engines": sorted(active_engines),
                     "search_log": search_log,
+                    "query_target_map": query_target_map,
+                    "coverage_snapshot": coverage_snapshot,
+                    "fallback_used": fallback_used_any,
                 }
                 packets.append(packet)
                 self.logger.info(
@@ -180,12 +267,248 @@ class ScrapAgent:
         fallback = self.MODEL_LEVEL_FALLBACK.get(iteration, "gpt-4o-mini")
         return self.state_controller.get_current_model("scrap", fallback_model=fallback)
 
+    def _normalize_research_queries(self, raw_queries: Any) -> List[str]:
+        if not isinstance(raw_queries, list):
+            return []
+        normalized = []
+        seen = set()
+        for item in raw_queries:
+            query = re.sub(r"\s+", " ", str(item or "").strip())
+            if not query:
+                continue
+            key = query.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(query)
+        return normalized
+
     def _normalize_iteration(self, value: Any) -> int:
         try:
             parsed = int(value)
         except (TypeError, ValueError):
             parsed = 1
         return min(max(parsed, 1), 3)
+
+    async def _decompose_query_to_targets(
+        self,
+        source_query: str,
+        research_context: dict,
+        extra_hints: str,
+        model_name: str,
+    ) -> List[str]:
+        description = str(research_context.get("description") or "")
+        key_points = research_context.get("key_points") or []
+        key_points_text = ", ".join(str(x) for x in key_points if str(x).strip())
+        min_targets = self._min_search_targets
+        max_targets = self._max_search_targets
+        prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "You decompose one source query into smaller search targets. "
+                    "Do NOT introduce new topics outside the source query and context. "
+                    f"Return JSON list only with {min_targets}-{max_targets} concise strings."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Source query: {source_query}\n"
+                    f"Description: {description}\n"
+                    f"Key points: {key_points_text}\n"
+                    f"Extra hints: {extra_hints}\n"
+                    f"Constraints: Generate {min_targets}-{max_targets} independent, searchable targets. "
+                    "Keep targets tightly scoped to the source query and key points."
+                ),
+            },
+        ]
+        try:
+            response = await call_model(prompt=prompt, model=model_name)
+        except Exception as exc:
+            self.logger.warning(f"Failed to decompose source query '{source_query}': {exc}")
+            return []
+
+        parsed = self._parse_targets(response)
+        return parsed[:max_targets]
+
+    def _validate_and_filter_targets(
+        self,
+        source_query: str,
+        candidate_targets: List[str],
+        research_context: dict,
+    ) -> dict:
+        cleaned = self._clean_targets(candidate_targets or [])
+        description = str(research_context.get("description") or "")
+        key_points = [str(x or "") for x in (research_context.get("key_points") or []) if str(x or "").strip()]
+        context_text = " ".join([source_query, description, *key_points]).strip()
+        context_terms = set(self._tokenize_validation(context_text))
+        anchor_terms = set(self._tokenize_validation(source_query))
+        context_vec = self._text_to_vector(context_text)
+
+        kept_payload: List[dict] = []
+        discarded: List[dict] = []
+        for target in cleaned:
+            reasons = []
+            length = len(target)
+            if length < self.TARGET_MIN_CHARS or length > self.TARGET_MAX_CHARS:
+                reasons.append("length_out_of_range")
+
+            target_terms = set(self._tokenize_validation(target))
+            anchor_hits = len(anchor_terms & target_terms)
+            if anchor_terms and anchor_hits < 1:
+                reasons.append("missing_anchor_terms")
+
+            target_vec = self._text_to_vector(target)
+            similarity = self._cosine_similarity(context_vec, target_vec)
+            if similarity < self.TARGET_SIMILARITY_MIN:
+                reasons.append("low_semantic_similarity")
+
+            if target_terms:
+                new_terms = [term for term in target_terms if term not in context_terms]
+                out_of_context_ratio = len(new_terms) / max(len(target_terms), 1)
+            else:
+                out_of_context_ratio = 1.0
+            if out_of_context_ratio > self.TARGET_OUT_OF_CONTEXT_MAX_RATIO:
+                reasons.append("too_many_out_of_context_terms")
+
+            payload = {
+                "target": target,
+                "reasons": reasons,
+                "scores": {
+                    "anchor_hits": anchor_hits,
+                    "semantic_similarity": round(similarity, 4),
+                    "out_of_context_ratio": round(out_of_context_ratio, 4),
+                },
+            }
+            if reasons:
+                discarded.append(payload)
+            else:
+                kept_payload.append(payload)
+
+        deduped_kept: List[str] = []
+        deduped_vecs: List[Counter] = []
+        for item in kept_payload:
+            target = item["target"]
+            target_vec = self._text_to_vector(target)
+            duplicate = False
+            for existing_vec in deduped_vecs:
+                if self._cosine_similarity(existing_vec, target_vec) > self.TARGET_NEAR_DUPLICATE_SIM:
+                    duplicate = True
+                    break
+            if duplicate:
+                discarded.append(
+                    {
+                        "target": target,
+                        "reasons": ["near_duplicate_target"],
+                        "scores": item["scores"],
+                    }
+                )
+                continue
+            deduped_kept.append(target)
+            deduped_vecs.append(target_vec)
+            if len(deduped_kept) >= self._max_search_targets:
+                break
+
+        coverage = {
+            "candidate_total": len(cleaned),
+            "kept_total": len(deduped_kept),
+            "discarded_total": len(discarded),
+        }
+        return {
+            "kept": deduped_kept,
+            "discarded": discarded,
+            "coverage": coverage,
+        }
+
+    def _tokenize_validation(self, text: str) -> List[str]:
+        tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", (text or "").lower())
+        normalized = []
+        for token in tokens:
+            if token in self.VALIDATION_STOPWORDS:
+                continue
+            if len(token) == 1 and re.match(r"[a-z]", token):
+                continue
+            normalized.append(token)
+        return normalized
+
+    def _fallback_targets_from_context(self, source_query: str, research_context: dict) -> List[str]:
+        description = str(research_context.get("description") or "").strip()
+        key_points = [str(x or "").strip() for x in (research_context.get("key_points") or []) if str(x or "").strip()]
+        targets: List[str] = []
+        if description:
+            targets.append(f"{source_query} {description}")
+        for point in key_points:
+            targets.append(f"{source_query} {point}")
+            if len(targets) >= self._max_search_targets:
+                break
+        if not targets:
+            targets.append(source_query)
+        return self._clean_targets(targets)
+
+    def _build_coverage_snapshot(
+        self,
+        query_target_map: List[dict],
+        search_log: List[dict],
+        research_context: dict,
+    ) -> dict:
+        total_queries = len(query_target_map)
+        covered_queries_set = set()
+        for row in search_log:
+            source_query = str(row.get("source_query") or "").strip()
+            passages = row.get("top_10_passages") or []
+            if source_query and passages:
+                covered_queries_set.add(source_query)
+
+        covered_queries = sum(
+            1 for item in query_target_map if str(item.get("source_query") or "").strip() in covered_queries_set
+        )
+        query_coverage = (covered_queries / total_queries) if total_queries else 0.0
+
+        key_points = [str(x or "").strip() for x in (research_context.get("key_points") or []) if str(x or "").strip()]
+        content_blob = []
+        for row in search_log:
+            content_blob.append(str(row.get("target") or ""))
+            for passage in row.get("top_10_passages") or []:
+                content_blob.append(str(passage.get("content") or ""))
+        corpus_terms = set(self._tokenize_validation(" ".join(content_blob)))
+
+        if not key_points:
+            keypoint_coverage = 1.0
+            covered_key_points = []
+            uncovered_key_points = []
+        else:
+            covered_key_points = []
+            uncovered_key_points = []
+            for point in key_points:
+                point_terms = set(self._tokenize_validation(point))
+                if not point_terms:
+                    covered_key_points.append(point)
+                    continue
+                if point_terms & corpus_terms:
+                    covered_key_points.append(point)
+                else:
+                    uncovered_key_points.append(point)
+            keypoint_coverage = len(covered_key_points) / len(key_points)
+
+        section_coverage = min(query_coverage, keypoint_coverage)
+        uncovered_queries = [
+            str(item.get("source_query") or "").strip()
+            for item in query_target_map
+            if str(item.get("source_query") or "").strip() not in covered_queries_set
+        ]
+        return {
+            "query_coverage": round(query_coverage, 4),
+            "keypoint_coverage": round(keypoint_coverage, 4),
+            "section_coverage": round(section_coverage, 4),
+            "query_total": total_queries,
+            "query_covered": covered_queries,
+            "uncovered_queries": [q for q in uncovered_queries if q],
+            "keypoint_total": len(key_points),
+            "keypoint_covered": len(covered_key_points),
+            "uncovered_key_points": uncovered_key_points,
+            "coverage_threshold": self.COVERAGE_THRESHOLD,
+        }
 
     async def _decompose_targets(
         self,
@@ -817,6 +1140,20 @@ class ScrapAgent:
             "model_level": "Level_1_Base",
             "active_engines": [],
             "search_log": [],
+            "query_target_map": [],
+            "coverage_snapshot": {
+                "query_coverage": 0.0,
+                "keypoint_coverage": 0.0,
+                "section_coverage": 0.0,
+                "query_total": 0,
+                "query_covered": 0,
+                "uncovered_queries": [],
+                "keypoint_total": 0,
+                "keypoint_covered": 0,
+                "uncovered_key_points": [],
+                "coverage_threshold": self.COVERAGE_THRESHOLD,
+            },
+            "fallback_used": False,
         }
 
     def _build_compatible_draft(self, topic: str, scrap_packet: dict) -> str:

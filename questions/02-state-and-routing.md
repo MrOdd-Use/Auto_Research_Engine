@@ -19,7 +19,7 @@
 
 **技术细节（实现 / 为什么 / 利弊）：**
 - 实现：Planner 以 JSON 形式返回 `section_details`（header/description/key_points/research_queries），并用 `ResearchOutline` 做结构校验与归一化（见 `gpt_researcher/utils/validators.py`、`multi_agents/agents/editor.py`）。
-- 补充：什么是「归一化 key」？这里指“字段名归一化”——把模型可能输出的不同字段名（大小写/分隔符/同义词/中英混用）映射为统一 schema 的标准 key，方便后续稳定读取与校验。例如：`Header`/`section_header` → `header`，`keyPoints`/`key-points` → `key_points`，`queries`/`search_queries` → `research_queries`。
+- 补充：当前实现对 `research_queries` 的要求是“字段名固定 + 值为字符串列表”；运行期会做列表去重与清洗，但不会把 `queries/search_queries` 这类别名自动映射为 `research_queries`。若规划输出不符合 schema，会走兜底路径并可能得到空 `research_queries`。
 - 为什么：结构化结果才能被后续节点稳定消费（并行、路由、校验、HITL 修改），避免纯文本难解析/易漂移。
 - 利弊：利是可校验、可回流；弊是模型可能格式漂移，需要容错解析/降级（当前实现包含归一化与兜底章节）。
 
