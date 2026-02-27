@@ -1,0 +1,28 @@
+{
+  "name": "Auto_Research_Engine",
+  "version": "1.0.27",
+  "description": "WebSocket client for GPT Researcher",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "Auto_Research_Engine",
+    "websocket",
+    "ai",
+    "research"
+  ],
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrOdd-Use/Auto_Research_Engine.git"
+  },
+  "author": "GPT Researcher Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/MrOdd-Use/Auto_Research_Engine/issues"
+  },
+  "homepage": "https://github.com/MrOdd-Use/Auto_Research_Engine#readme"
+}

@@ -1,0 +1,56 @@
+{
+  "planner": {
+    "current_idx": 3,
+    "tiers": [
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini"
+    ]
+  },
+  "scrap": {
+    "current_idx": 3,
+    "tiers": [
+      "o1-preview",
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini"
+    ]
+  },
+  "check_data": {
+    "current_idx": 2,
+    "tiers": [
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini"
+    ]
+  },
+  "writer": {
+    "current_idx": 1,
+    "tiers": [
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini"
+    ]
+  },
+  "review": {
+    "current_idx": 0,
+    "tiers": [
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini"
+    ]
+  },
+  "revise": {
+    "current_idx": 2,
+    "tiers": [
+      "o1-preview",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini"
+    ]
+  }
+}
