@@ -1,4 +1,4 @@
-"""Research conductor skill for GPT Researcher.
+"""Research conductor skill for Auto_Research_Engine.
 
 This module provides the ResearchConductor class that manages and
 coordinates the research process including query planning, web searching,
@@ -87,7 +87,7 @@ class ResearchConductor:
         return outline
 
     async def conduct_research(self):
-        """Runs the GPT Researcher to conduct research"""
+        """Runs the Auto_Research_Engine to conduct research"""
         if self.json_handler:
             self.json_handler.update_content("query", self.researcher.query)
         

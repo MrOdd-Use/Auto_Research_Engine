@@ -1,6 +1,6 @@
 # Frontend Application
 
-This frontend project aims to enhance the user experience of GPT-Researcher, providing an intuitive and efficient interface for automated research. It offers two deployment options to suit different needs and environments.
+This frontend project aims to enhance the user experience of Auto_Research_Engine, providing an intuitive and efficient interface for automated research. It offers two deployment options to suit different needs and environments.
 
 ## Option 1: Static Frontend (FastAPI)
 
@@ -74,7 +74,7 @@ For production, NextJS is recommended.
 
 ## Frontend Features
 
-Our frontend enhances GPT-Researcher by providing:
+Our frontend enhances Auto_Research_Engine by providing:
 
 1. Intuitive Research Interface: Streamlined input for research queries.
 2. Real-time Progress Tracking: Visual feedback on ongoing research tasks.
@@ -82,4 +82,4 @@ Our frontend enhances GPT-Researcher by providing:
 4. Customizable Settings: Adjust research parameters to suit specific needs.
 5. Responsive Design: Optimal experience across various devices.
 
-These features aim to make the research process more efficient and user-friendly, complementing GPT-Researcher's powerful agent capabilities.
+These features aim to make the research process more efficient and user-friendly, complementing Auto_Research_Engine's powerful agent capabilities.

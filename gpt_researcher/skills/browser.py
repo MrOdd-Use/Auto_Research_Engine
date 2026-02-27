@@ -1,4 +1,4 @@
-"""Browser manager skill for GPT Researcher.
+"""Browser manager skill for Auto_Research_Engine.
 
 This module provides the BrowserManager class that handles web scraping
 and content extraction from URLs.

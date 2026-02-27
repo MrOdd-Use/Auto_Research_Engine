@@ -87,7 +87,7 @@ async def main(num_examples: int):
         if not evaluator.examples:
             raise ValueError("No examples loaded in evaluator")
         
-        print(f"Starting GPT-Researcher evaluation with {num_examples} test queries...")
+        print(f"Starting Auto_Research_Engine evaluation with {num_examples} test queries...")
         
         results = []
         for example in evaluator.examples:
@@ -183,7 +183,7 @@ async def main(num_examples: int):
         raise
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Run GPT-Researcher evaluation')
+    parser = argparse.ArgumentParser(description='Run Auto_Research_Engine evaluation')
     parser.add_argument('--num_examples', type=int, default=1,
                       help='Number of examples to evaluate. Default is 1 example.')
     args = parser.parse_args()

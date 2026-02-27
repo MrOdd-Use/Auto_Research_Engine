@@ -1,6 +1,6 @@
 # Scraping Options
 
-GPT Researcher now offers various methods for web scraping: static scraping with BeautifulSoup, dynamic scraping with Selenium, and High scale scraping with Tavily Extract. This document explains how to switch between these methods and the benefits of each approach.
+Auto_Research_Engine now offers various methods for web scraping: static scraping with BeautifulSoup, dynamic scraping with Selenium, and High scale scraping with Tavily Extract. This document explains how to switch between these methods and the benefits of each approach.
 
 ## Configuring Scraping Method
 
@@ -32,13 +32,13 @@ You can choose your preferred scraping method by setting the `SCRAPER` environme
    export SCRAPER="firecrawl"
    ```
 
-Note: If not set, GPT Researcher will default to BeautifulSoup for scraping.
+Note: If not set, Auto_Research_Engine will default to BeautifulSoup for scraping.
 
 ## Scraping Methods Explained
 
 ### BeautifulSoup (Static Scraping)
 
-When `SCRAPER="bs"`, GPT Researcher uses BeautifulSoup for static scraping. This method:
+When `SCRAPER="bs"`, Auto_Research_Engine uses BeautifulSoup for static scraping. This method:
 
 - Sends a single HTTP request to fetch the page content
 - Parses the static HTML content
@@ -55,7 +55,7 @@ Limitations:
 
 ### Selenium (Browser Scraping)
 
-When `SCRAPER="browser"`, GPT Researcher uses Selenium for dynamic scraping. This method:
+When `SCRAPER="browser"`, Auto_Research_Engine uses Selenium for dynamic scraping. This method:
 
 - Opens a real browser instance (Chrome by default)
 - Loads the page and executes JavaScript
@@ -83,7 +83,7 @@ pip install zendriver
 
 ### Tavily Extract (Recommended for Production)
 
-When `SCRAPER="tavily_extract"`, GPT Researcher uses Tavily's Extract API for web scraping. This method:
+When `SCRAPER="tavily_extract"`, Auto_Research_Engine uses Tavily's Extract API for web scraping. This method:
 
 - Uses Tavily's robust infrastructure to handle web scraping at scale
 - Automatically handles CAPTCHAs, JavaScript rendering, and anti-bot measures
@@ -116,7 +116,7 @@ Usage Considerations:
 - Ideal for businesses and applications that need consistent scraping results
 
 ### FireCrawl (Recommended for Production)
-When `SCRAPER="firecrawl"`, GPT Researcher uses FireCrawl Scrape API for web scraping in markdown format. This method:
+When `SCRAPER="firecrawl"`, Auto_Research_Engine uses FireCrawl Scrape API for web scraping in markdown format. This method:
 
 - Uses FireCrawl's robust infrastructure to handle web scraping at scale
 - Or uses self-hosted FireCrawl server.
@@ -199,4 +199,4 @@ If you choose to use Selenium (SCRAPER="browser"), you'll need to:
 - If you encounter an `ImportError` related to Selenium, make sure you've installed the Selenium package.
 - If the scraper misses expected content, try switching between static and dynamic scraping to see which works better for your target website.
 
-Remember, the choice between static and dynamic scraping can significantly impact the quality and completeness of the data GPT Researcher can gather. Choose the method that best suits your research needs and the websites you're targeting.
+Remember, the choice between static and dynamic scraping can significantly impact the quality and completeness of the data Auto_Research_Engine can gather. Choose the method that best suits your research needs and the websites you're targeting.

@@ -28,7 +28,7 @@
     },
     {
       type: 'category',
-      label: 'GPT Researcher',
+      label: 'Auto_Research_Engine',
       collapsible: true,
       collapsed: true,
       items: [

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GPT-Researcher Backend Server Startup Script
+Auto_Research_Engine Backend Server Startup Script
 
 Run this to start the research API server.
 """

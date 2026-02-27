@@ -5,12 +5,12 @@ import styles from './HomepageFeatures.module.css';
 
 const FeatureList = [
   {
-    title: 'GPT Researcher',
+    title: 'Auto_Research_Engine',
     Svg: require('../../static/img/gptr-logo.png').default,
     docLink: './docs/Auto_Research_Engine/getting-started/getting-started',
     description: (
       <>
-        GPT Researcher is an open source autonomous agent designed for comprehensive online research on a variety of tasks.
+        Auto_Research_Engine is an open source autonomous agent designed for comprehensive online research on a variety of tasks.
       </>
     ),
   },
@@ -40,7 +40,7 @@ const FeatureList = [
     docLink: './docs/examples/examples',
     description: (
       <>
-          Check out GPT Researcher in action across multiple frameworks and use cases such as hybrid research and long detailed reports.
+          Check out Auto_Research_Engine in action across multiple frameworks and use cases such as hybrid research and long detailed reports.
       </>
     ),
   },

@@ -4,7 +4,7 @@
 
 🌟 **Exciting News!** Now, you can integrate `Auto_Research_Engine` with your apps seamlessly!
 
-## Steps to Install GPT Researcher
+## Steps to Install Auto_Research_Engine
 
 Follow these easy steps to get started:
 
@@ -25,7 +25,7 @@ export OPENAI_API_KEY={Your OpenAI API Key here}
 export TAVILY_API_KEY={Your Tavily API Key here}
 ```
 
-3. **Start using GPT Researcher in your own codebase**
+3. **Start using Auto_Research_Engine in your own codebase**
 
 ## Example Usage
 
@@ -170,7 +170,7 @@ curl -X GET "http://localhost:5000/report/research_report?query=what team may wi
 ```
 
 ## Getters and Setters
-GPT Researcher provides several methods to retrieve additional information about the research process:
+Auto_Research_Engine provides several methods to retrieve additional information about the research process:
 
 ### Get Research Sources
 Sources are the URLs that were used to gather information for the research.
@@ -317,4 +317,4 @@ similar_contents = await researcher.get_similar_written_contents_by_draft_sectio
 )
 ```
 
-This comprehensive documentation should help users understand and utilize the full capabilities of the GPT Researcher package.
+This comprehensive documentation should help users understand and utilize the full capabilities of the Auto_Research_Engine package.

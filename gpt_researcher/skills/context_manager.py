@@ -1,4 +1,4 @@
-"""Context manager skill for GPT Researcher.
+"""Context manager skill for Auto_Research_Engine.
 
 This module provides the ContextManager class that handles context
 retrieval, compression, and similarity matching for research queries.

@@ -1,4 +1,4 @@
-"""Pydantic validation models for GPT Researcher."""
+"""Pydantic validation models for Auto_Research_Engine."""
 
 from typing import List
 

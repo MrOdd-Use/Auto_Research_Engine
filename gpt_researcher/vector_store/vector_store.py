@@ -9,7 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class VectorStoreWrapper:
     """
-    A Wrapper for LangchainVectorStore to handle GPT-Researcher Document Type
+    A Wrapper for LangchainVectorStore to handle Auto_Research_Engine Document Type
     """
     def __init__(self, vector_store : VectorStore):
         self.vector_store = vector_store
@@ -24,7 +24,7 @@ class VectorStoreWrapper:
         self.vector_store.add_documents(splitted_documents)
     
     def _create_langchain_documents(self, data: List[Dict[str, str]]) -> List[Document]:
-        """Convert GPT Researcher Document to Langchain Document"""
+        """Convert Auto_Research_Engine Document to Langchain Document"""
         return [Document(page_content=item["raw_content"], metadata={"source": item["url"]}) for item in data]
 
     def _split_documents(self, documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Document]:

@@ -17,10 +17,10 @@ Here's a minmalistic HTML example (P.S. You can also save this as an index.html 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPT Researcher Embed Demo</title>
+    <title>Auto_Research_Engine Embed Demo</title>
 </head>
 <body style="margin: 0; padding: 0;">
-    <!-- GPT Researcher Embed -->
+    <!-- Auto_Research_Engine Embed -->
     <script>localStorage.setItem("GPTR_API_URL", "http://localhost:8000");</script>
     <script src="https://app.gptr.dev/embed.js"></script>
 </body>

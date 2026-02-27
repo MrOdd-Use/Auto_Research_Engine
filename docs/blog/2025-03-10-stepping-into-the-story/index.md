@@ -1,6 +1,6 @@
 ---
 slug: stepping-into-the-story
-title: Stepping Into the Story of GPT Researcher
+title: Stepping Into the Story of Auto_Research_Engine
 authors: [elishakay]
 tags: [ai, Auto_Research_Engine, prompts, dreams, community]
 image: https://github.com/user-attachments/assets/f6e8a6b5-12f8-4faa-ae99-6a2fbaf23cc1
@@ -23,21 +23,21 @@ The journey was tough—I struggled to find my place, faced canceled contracts, 
 
 Even when I finally landed a job at Fiverr, working with JavaScript, MySQL, HTML, and CSS, I still felt like I had abandoned my identity as a writer.
 
-## Discovering GPT Researcher
+## Discovering Auto_Research_Engine
 
-One night, about a year ago, deep into a rabbit hole of AI research, I stumbled upon GPT Researcher. The concept struck me instantly—AI wasn't just a tool; it was a means of expanding human knowledge, refining our questions, and reshaping how we approach research itself.
+One night, about a year ago, deep into a rabbit hole of AI research, I stumbled upon Auto_Research_Engine. The concept struck me instantly—AI wasn't just a tool; it was a means of expanding human knowledge, refining our questions, and reshaping how we approach research itself.
 
 I reached out to Assaf, not expecting much. But instead of a polite acknowledgment, he welcomed me in. That moment—seeing my first commit merged—felt like an echo of my old dream. Only this time, I wasn't just writing stories. I was building something that helped others uncover their own.
 
 ## The Wicked Witch of the Researcher's Mirror
 
-Around that time, I found myself repeatedly asking GPT Researcher the same question:
+Around that time, I found myself repeatedly asking Auto_Research_Engine the same question:
 
 "Who is Elisha Kramer?"
 
 At first, it was like the Magic Mirror in Snow White, responding with something generic like, "Elisha Kramer is a software engineer with experience in web development." It pulled information from my LinkedIn, GitHub, and Udemy profiles, painting a picture of who I was professionally. But then, things got weird.
 
-I made more commits to GPT Researcher. More contributions. And as I coded, I asked a different question.
+I made more commits to Auto_Research_Engine. More contributions. And as I coded, I asked a different question.
 
 "Who is ElishaKay on Github?"
 
@@ -49,7 +49,7 @@ Holy Shnikes! It was learning. Another commit. Another feature. Another line of 
 
 "Who is ElishaKay of Auto_Research_Engine?"
 
-"ElishaKay is a core contributor of GPT Researcher, improving research workflows and enhancing AI retrieval through significant code and documentation contributions."
+"ElishaKay is a core contributor of Auto_Research_Engine, improving research workflows and enhancing AI retrieval through significant code and documentation contributions."
 
 Now we were talking. But I wasn't done. Like the Wicked Witch, I kept coming back. More commits. More improvements. More features.
 
@@ -57,15 +57,15 @@ Until finally, I asked:
 
 "Tell me about Auto_Research_Engine and tips to improve it"
 
-And GPT Researcher looked back at me and said:
+And Auto_Research_Engine looked back at me and said:
 
 "GPTR is a thriving open-source community. The best path forward is to continue investing in that community - through code contributions, documentation improvements, and helping new contributors get started. The project's strength lies in its collaborative nature."
 
-And that's when I knew—I wasn't just using GPT Researcher. I was becoming part of its story.
+And that's when I knew—I wasn't just using Auto_Research_Engine. I was becoming part of its story.
 
 ## AI as a mirror of ourselves
 
-This evolving feedback helped me frame my own self-narrative. GPT Researcher wasn't just reflecting what was already known—it was pulling in context from both my work and the broader internet.
+This evolving feedback helped me frame my own self-narrative. Auto_Research_Engine wasn't just reflecting what was already known—it was pulling in context from both my work and the broader internet.
 
 It was reflecting back my own journey, refining it with each step, blurring the illusion of a fixed identity, and embracing an evolving one.
 
@@ -73,7 +73,7 @@ Every query, every commit, every improvement shaped the tool—and in turn, it s
 
 ## Building as a Community
 
-GPT Researcher isn't just a tool. It's a reflection of the open-source spirit, a living, evolving ecosystem where knowledge isn't static but constantly refined. It isn't just answering questions; it's engaging in a dialogue, shaping and reshaping narratives based on the latest contributions, research, and discoveries.
+Auto_Research_Engine isn't just a tool. It's a reflection of the open-source spirit, a living, evolving ecosystem where knowledge isn't static but constantly refined. It isn't just answering questions; it's engaging in a dialogue, shaping and reshaping narratives based on the latest contributions, research, and discoveries.
 It isn't just about me anymore. It's about us.
 A network of 138 contributors. An open-source project watched by 20,000 stars. A collective movement pushing the boundaries of AI-driven research.
 

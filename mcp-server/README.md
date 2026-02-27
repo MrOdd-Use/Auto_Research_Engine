@@ -1,16 +1,16 @@
-# 🔍 GPT Researcher MCP Server
+# 🔍 Auto_Research_Engine MCP Server
 
 > **Note:** This content has been moved to a dedicated repository: [https://github.com/assafelovic/gptr-mcp](https://github.com/assafelovic/gptr-mcp)
 
 ## Overview
 
-The GPT Researcher MCP Server enables AI assistants like Claude to conduct comprehensive web research and generate detailed reports via the Machine Conversation Protocol (MCP).
+The Auto_Research_Engine MCP Server enables AI assistants like Claude to conduct comprehensive web research and generate detailed reports via the Machine Conversation Protocol (MCP).
 
-## Why GPT Researcher MCP?
+## Why Auto_Research_Engine MCP?
 
-While LLM apps can access web search tools with MCP, **GPT Researcher MCP delivers deep research results.** Standard search tools return raw results requiring manual filtering, often containing irrelevant sources and wasting context window space.
+While LLM apps can access web search tools with MCP, **Auto_Research_Engine MCP delivers deep research results.** Standard search tools return raw results requiring manual filtering, often containing irrelevant sources and wasting context window space.
 
-GPT Researcher autonomously explores and validates numerous sources, focusing only on relevant, trusted and up-to-date information. Though slightly slower than standard search (~30 seconds wait), it delivers:
+Auto_Research_Engine autonomously explores and validates numerous sources, focusing only on relevant, trusted and up-to-date information. Though slightly slower than standard search (~30 seconds wait), it delivers:
 
 * ✨ Higher quality information
 * 📊 Optimized context usage

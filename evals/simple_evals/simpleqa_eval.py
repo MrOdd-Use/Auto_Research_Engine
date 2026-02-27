@@ -1,6 +1,6 @@
 """
 SimpleQA: Measuring short-form factuality in large language models
-Adapted for GPT-Researcher from OpenAI's simple-evals
+Adapted for Auto_Research_Engine from OpenAI's simple-evals
 """
 
 import os

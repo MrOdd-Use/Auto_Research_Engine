@@ -1,4 +1,4 @@
-"""Utility functions for GPT Researcher retrievers.
+"""Utility functions for Auto_Research_Engine retrievers.
 
 This module provides helper functions and constants used by the
 various search retriever implementations.

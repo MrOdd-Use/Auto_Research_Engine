@@ -3,7 +3,7 @@ const math = require('remark-math');
 const katex = require('rehype-katex');
 
 module.exports = {
-  title: 'GPT Researcher',
+  title: 'Auto_Research_Engine',
   tagline: 'The leading autonomous AI research agent',
   url: 'https://docs.gptr.dev',
   baseUrl: '/',
@@ -16,9 +16,9 @@ module.exports = {
   projectName: 'Auto_Research_Engine',
   themeConfig: {
     navbar: {
-      title: 'GPT Researcher',
+      title: 'Auto_Research_Engine',
       logo: {
-        alt: 'GPT Researcher',
+        alt: 'Auto_Research_Engine',
         src: 'img/gptr-logo.png',
       },
       items: [
@@ -82,7 +82,7 @@ module.exports = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} GPT Researcher.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Auto_Research_Engine.`,
     },
   },
   presets: [

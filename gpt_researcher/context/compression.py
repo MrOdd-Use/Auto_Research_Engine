@@ -1,4 +1,4 @@
-"""Context compression utilities for GPT Researcher.
+"""Context compression utilities for Auto_Research_Engine.
 
 This module provides classes for compressing and retrieving relevant
 context from documents using embeddings and similarity filtering.

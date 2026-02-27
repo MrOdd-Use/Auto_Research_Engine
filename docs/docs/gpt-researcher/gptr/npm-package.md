@@ -1,6 +1,6 @@
 # npm package
 
-The [Auto_Research_Engine npm package](https://www.npmjs.com/package/Auto_Research_Engine) is a WebSocket client for interacting with GPT Researcher.
+The [Auto_Research_Engine npm package](https://www.npmjs.com/package/Auto_Research_Engine) is a WebSocket client for interacting with Auto_Research_Engine.
 
 ## Installation
 

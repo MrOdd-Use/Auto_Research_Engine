@@ -1,4 +1,4 @@
-"""Embedding provider management for GPT Researcher.
+"""Embedding provider management for Auto_Research_Engine.
 
 This module provides the Memory class that handles embedding generation
 across multiple providers (OpenAI, Cohere, Google, Ollama, etc.).

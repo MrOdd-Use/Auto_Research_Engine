@@ -89,7 +89,7 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({
             />
           </a>
           <h2 className="text-base font-medium text-gray-200">
-            GPT Researcher
+            Auto_Research_Engine
           </h2>
         </div>
         

@@ -2247,7 +2247,7 @@ const GPTResearcher = (() => {
           <i class="fas fa-times"></i>
         </button>
         <h3>Model Context Protocol (MCP)</h3>
-        <p>MCP enables GPT Researcher to connect with external tools and data sources through a standardized protocol.</p>
+        <p>MCP enables Auto_Research_Engine to connect with external tools and data sources through a standardized protocol.</p>
         
         <h4 class="highlight">Benefits:</h4>
         <ul>

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for MCP integration in GPT Researcher
+Test script for MCP integration in Auto_Research_Engine
 
 This script tests two MCP integration scenarios:
 1. Web Search MCP (Tavily) - News and general web search queries
@@ -12,7 +12,7 @@ Both tests verify:
 - Report generation with MCP data
 
 Prerequisites:
-1. Install GPT Researcher: pip install Auto_Research_Engine
+1. Install Auto_Research_Engine: pip install Auto_Research_Engine
 2. Install MCP servers:
    - Web Search: npm install -g tavily-mcp
    - GitHub: npm install -g @modelcontextprotocol/server-github
@@ -224,7 +224,7 @@ async def test_github_mcp():
 
 async def main():
     """Main test function."""
-    print("🚀 Testing MCP Integration with GPT Researcher")
+    print("🚀 Testing MCP Integration with Auto_Research_Engine")
     print("=" * 50)
     
     # Check environment setup

@@ -1,11 +1,11 @@
 ---
 name: Auto_Research_Engine
-description: GPT Researcher is an autonomous deep research agent that conducts web and local research, producing detailed reports with citations. Use this skill when helping developers understand, extend, debug, or integrate with GPT Researcher - including adding features, understanding the architecture, working with the API, customizing research workflows, adding new retrievers, integrating MCP data sources, or troubleshooting research pipelines.
+description: Auto_Research_Engine is an autonomous deep research agent that conducts web and local research, producing detailed reports with citations. Use this skill when helping developers understand, extend, debug, or integrate with Auto_Research_Engine - including adding features, understanding the architecture, working with the API, customizing research workflows, adding new retrievers, integrating MCP data sources, or troubleshooting research pipelines.
 ---
 
-# GPT Researcher Development Skill
+# Auto_Research_Engine Development Skill
 
-GPT Researcher is an LLM-based autonomous agent using a planner-executor-publisher pattern with parallelized agent work for speed and reliability.
+Auto_Research_Engine is an LLM-based autonomous agent using a planner-executor-publisher pattern with parallelized agent work for speed and reliability.
 
 ## Quick Start
 

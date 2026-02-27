@@ -74,12 +74,12 @@ export default function MobileLayout({
             <a href="/" className="flex items-center">
               <img
                 src="/img/gptr-logo.png"
-                alt="GPT Researcher"
+                alt="Auto_Research_Engine"
                 width={30}
                 height={30}
                 className="rounded-md mr-2"
               />
-              <span className="font-medium text-gray-200 text-sm">GPT Researcher</span>
+              <span className="font-medium text-gray-200 text-sm">Auto_Research_Engine</span>
             </a>
           </div>
           
@@ -337,7 +337,7 @@ export default function MobileLayout({
           </a>
         </div>
         <div className="text-xs text-gray-400">
-          © {new Date().getFullYear()} GPT Researcher. All rights reserved.
+          © {new Date().getFullYear()} Auto_Research_Engine. All rights reserved.
         </div>
       </footer>
       

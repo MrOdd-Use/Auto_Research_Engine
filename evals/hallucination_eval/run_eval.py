@@ -1,5 +1,5 @@
 """
-Script to run GPT-Researcher queries and evaluate them for hallucination.
+Script to run Auto_Research_Engine queries and evaluate them for hallucination.
 """
 import json
 import logging
@@ -32,7 +32,7 @@ DEFAULT_OUTPUT_DIR = "evals/hallucination_eval/results"
 DEFAULT_QUERIES_FILE = "evals/hallucination_eval/inputs/search_queries.jsonl"
 
 class ResearchEvaluator:
-    """Runs GPT-Researcher queries and evaluates responses for hallucination."""
+    """Runs Auto_Research_Engine queries and evaluates responses for hallucination."""
     
     def __init__(self, queries_file: str = DEFAULT_QUERIES_FILE):
         """
@@ -67,7 +67,7 @@ class ResearchEvaluator:
         
     async def run_research(self, query: str) -> Dict:
         """
-        Run a single query through GPT-Researcher.
+        Run a single query through Auto_Research_Engine.
         
         Args:
             query: The search query to research
@@ -219,7 +219,7 @@ async def main(num_queries: int = 5, output_dir: str = DEFAULT_OUTPUT_DIR):
         print("No responses could be evaluated due to missing source text")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run GPT-Researcher evaluation")
+    parser = argparse.ArgumentParser(description="Run Auto_Research_Engine evaluation")
     parser.add_argument("-n", "--num-queries", type=int, default=5,
                       help="Number of queries to evaluate")
     parser.add_argument("-o", "--output-dir", type=str, default=DEFAULT_OUTPUT_DIR,

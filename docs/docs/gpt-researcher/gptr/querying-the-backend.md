@@ -99,7 +99,7 @@ And here's how you can leverage this helper function:
 const { sendWebhookMessage } = require('./gptr-webhook');
 
 async function main() {
-  const message = 'How do I get started with GPT-Researcher Websockets?';
+  const message = 'How do I get started with Auto_Research_Engine Websockets?';
   const response = await sendWebhookMessage(message);
   console.log('Response:', response);
 }

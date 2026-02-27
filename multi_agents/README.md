@@ -1,4 +1,4 @@
-# LangGraph x GPT Researcher
+# LangGraph x Auto_Research_Engine
 [LangGraph](https://python.langchain.com/docs/langgraph) is a library for building stateful, multi-actor applications with LLMs. 
 This example uses Langgraph to automate the process of an in depth research on any given topic.
 
@@ -8,7 +8,7 @@ Inspired by the recent [STORM](https://arxiv.org/abs/2402.14207) paper, this exa
 
 An average run generates a 5-6 page research report in multiple formats such as PDF, Docx and Markdown.
 
-Please note: Multi-agents are utilizing the same configuration of models like GPT-Researcher does. However, only the SMART_LLM is used for the time being. Please refer to the [LLM config pages](https://docs.gptr.dev/docs/Auto_Research_Engine/llms).
+Please note: Multi-agents are utilizing the same configuration of models like Auto_Research_Engine does. However, only the SMART_LLM is used for the time being. Please refer to the [LLM config pages](https://docs.gptr.dev/docs/Auto_Research_Engine/llms).
 
 ## The Multi Agent Team
 The research team is made up of 8 agents:
@@ -51,7 +51,7 @@ More specifically (as seen in the architecture diagram) the process is as follow
     ```bash
     pip install -r requirements.txt
     ```
-3. Update env variables, see the [GPT-Researcher docs](https://docs.gptr.dev/docs/Auto_Research_Engine/llms) for more details.
+3. Update env variables, see the [Auto_Research_Engine docs](https://docs.gptr.dev/docs/Auto_Research_Engine/llms) for more details.
 
 2. Run the application:
     ```bash

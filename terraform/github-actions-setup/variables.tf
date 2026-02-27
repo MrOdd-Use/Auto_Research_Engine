@@ -17,7 +17,7 @@ variable "environment" {
 }
 
 variable "webui_pipeline_secret_manager" {
-  description = "OAth client credentials for GPT Researcher"
+  description = "OAth client credentials for Auto_Research_Engine"
   type        = string
   default     = "arn:aws:secretsmanager:us-east-1:908027381725:secret:webUIpipelinesOpenAIApiKey-uUPw5T"
 }

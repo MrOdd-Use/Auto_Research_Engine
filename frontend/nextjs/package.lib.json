@@ -1,6 +1,6 @@
 {
   "name": "Auto_Research_Engine-ui",
-  "description": "GPT Researcher frontend as a React component",
+  "description": "Auto_Research_Engine frontend as a React component",
   "version": "0.1.74",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
@@ -85,7 +85,7 @@
     "react",
     "nextjs"
   ],
-  "author": "GPT Researcher Team",
+  "author": "Auto_Research_Engine Team",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/MrOdd-Use/Auto_Research_Engine/issues"

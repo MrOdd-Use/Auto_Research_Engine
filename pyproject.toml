@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "Auto_Research_Engine"
 version = "0.14.6"
-description = "GPT Researcher is an autonomous agent designed for comprehensive online research on a variety of tasks."
+description = "Auto_Research_Engine is an autonomous agent designed for comprehensive online research on a variety of tasks."
 authors = ["Assaf Elovic <assaf.elovic@gmail.com>"]
 license = "MIT"
 readme = "README.md"
@@ -64,7 +64,7 @@ Auto_Research_Engine = { workspace = true }
 [project]
 name = "Auto_Research_Engine"
 version = "0.14.6"
-description = "GPT Researcher is an autonomous agent designed for comprehensive online research on a variety of tasks."
+description = "Auto_Research_Engine is an autonomous agent designed for comprehensive online research on a variety of tasks."
 authors = [{ name = "Assaf Elovic", email = "assaf.elovic@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"

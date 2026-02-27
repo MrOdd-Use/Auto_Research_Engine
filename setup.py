@@ -22,7 +22,7 @@ with open("requirements.txt", "r") as f:
 setup(
     name="Auto_Research_Engine",
     version=LATEST_VERSION,
-    description="GPT Researcher is an autonomous agent designed for comprehensive web research on any task",
+    description="Auto_Research_Engine is an autonomous agent designed for comprehensive web research on any task",
     package_dir={'gpt_researcher': 'gpt_researcher'},
     packages=find_packages(exclude=exclude_packages),
     long_description=long_description,

@@ -1,10 +1,10 @@
-# GPT Researcher MCP Integration
+# Auto_Research_Engine MCP Integration
 
-This directory contains the comprehensive Model Context Protocol (MCP) integration for GPT Researcher. MCP enables GPT Researcher to seamlessly connect with and utilize external tools and data sources through a standardized protocol.
+This directory contains the comprehensive Model Context Protocol (MCP) integration for Auto_Research_Engine. MCP enables Auto_Research_Engine to seamlessly connect with and utilize external tools and data sources through a standardized protocol.
 
 ## 🔧 What is MCP?
 
-Model Context Protocol (MCP) is an open standard that enables secure connections between AI applications and external data sources and tools. With MCP, GPT Researcher can:
+Model Context Protocol (MCP) is an open standard that enables secure connections between AI applications and external data sources and tools. With MCP, Auto_Research_Engine can:
 
 - **Access Local Data**: Connect to databases, file systems, and local APIs
 - **Use External Tools**: Integrate with web services, APIs, and third-party tools
@@ -27,7 +27,7 @@ gpt_researcher/mcp/
 
 #### 🤖 `client.py` - MCPClientManager
 Handles MCP server connections and client lifecycle:
-- Converts GPT Researcher configs to MCP format
+- Converts Auto_Research_Engine configs to MCP format
 - Manages MultiServerMCPClient instances
 - Handles connection types (stdio, websocket, HTTP)
 - Provides automatic cleanup and resource management
@@ -69,7 +69,7 @@ Real-time streaming and logging:
 
 ### Basic Usage
 
-#### 1. Configure MCP in GPT Researcher
+#### 1. Configure MCP in Auto_Research_Engine
 
 ```python
 from gpt_researcher import GPTResearcher
@@ -238,7 +238,7 @@ logging.getLogger('gpt_researcher.mcp').setLevel(logging.DEBUG)
 
 - **MCP Specification**: [Model Context Protocol Docs](https://spec.modelcontextprotocol.io/)
 - **langchain-mcp-adapters**: [GitHub Repository](https://github.com/modelcontextprotocol/langchain-mcp-adapters)
-- **GPT Researcher Docs**: [Documentation](https://docs.gptr.dev/)
+- **Auto_Research_Engine Docs**: [Documentation](https://docs.gptr.dev/)
 - **Example MCP Servers**: [MCP Examples](https://github.com/modelcontextprotocol/servers)
 
 ## 🤝 Contributing
@@ -253,4 +253,4 @@ Contributions to the MCP integration are welcome! Please:
 
 ---
 
-*This MCP integration brings powerful extensibility to GPT Researcher, enabling connections to virtually any data source or tool through the standardized MCP protocol.* 🙂 
+*This MCP integration brings powerful extensibility to Auto_Research_Engine, enabling connections to virtually any data source or tool through the standardized MCP protocol.* 🙂 

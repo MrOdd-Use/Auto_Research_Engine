@@ -1,11 +1,11 @@
 # Configuration
 
-The config.py enables you to customize GPT Researcher to your specific needs and preferences.
+The config.py enables you to customize Auto_Research_Engine to your specific needs and preferences.
 
-Thanks to our amazing community and contributions, GPT Researcher supports multiple LLMs and Retrievers.
-In addition, GPT Researcher can be tailored to various report formats (such as APA), word count, research iterations depth, etc.
+Thanks to our amazing community and contributions, Auto_Research_Engine supports multiple LLMs and Retrievers.
+In addition, Auto_Research_Engine can be tailored to various report formats (such as APA), word count, research iterations depth, etc.
 
-GPT Researcher defaults to our recommended suite of integrations: [OpenAI](https://platform.openai.com/docs/overview) for LLM calls and [Tavily API](https://app.tavily.com) for retrieving real-time web information.
+Auto_Research_Engine defaults to our recommended suite of integrations: [OpenAI](https://platform.openai.com/docs/overview) for LLM calls and [Tavily API](https://app.tavily.com) for retrieving real-time web information.
 
 As seen below, OpenAI still stands as the superior LLM. We assume it will stay this way for some time, and that prices will only continue to decrease, while performance and speed increase over time.
 
@@ -13,7 +13,7 @@ As seen below, OpenAI still stands as the superior LLM. We assume it will stay t
 <img align="center" height="350" src="/img/leaderboard.png" />
 </div>
 
-The default config.py file can be found in `/gpt_researcher/config/`. It supports various options for customizing GPT Researcher to your needs.
+The default config.py file can be found in `/gpt_researcher/config/`. It supports various options for customizing Auto_Research_Engine to your needs.
 You can also include your own external JSON file `config.json` by adding the path in the `config_path` param.
 The config JSON should follow the format/keys in the default config. Below is a sample config.json file to help get you started:
 ```json
@@ -38,7 +38,7 @@ The config JSON should follow the format/keys in the default config. Below is a 
 ```
 
 
-For example, to start GPT-Researcher and specify a specific config you would do this:
+For example, to start Auto_Research_Engine and specify a specific config you would do this:
 ```bash
 python gpt_researcher/main.py --config_path my_config.json
 ```
@@ -74,7 +74,7 @@ Below is a list of current supported options:
 - **`MAX_SUBTOPICS`**: Maximum number of subtopics to generate or consider. Defaults to `3`.
 - **`SCRAPER`**: Web scraper to use for gathering information. Defaults to `bs` (BeautifulSoup). You can also use [newspaper](https://github.com/codelucas/newspaper).
 - **`MAX_SCRAPER_WORKERS`**: Maximum number of concurrent scraper workers per research. Defaults to `15`.
-- **`REPORT_SOURCE`**: Source for the research report data. Defaults to `web` for online research. Can be set to `doc` for local document-based research. This determines where GPT Researcher gathers its primary information from.
+- **`REPORT_SOURCE`**: Source for the research report data. Defaults to `web` for online research. Can be set to `doc` for local document-based research. This determines where Auto_Research_Engine gathers its primary information from.
 - **`DOC_PATH`**: Path to read and research local documents. Defaults to `./my-docs`.
 - **`PROMPT_FAMILY`**: The family of prompts and prompt formatting to use. Defaults to prompting optimized for GPT models. See the full list of options in [enum.py](https://github.com/MrOdd-Use/Auto_Research_Engine/blob/master/gpt_researcher/utils/enum.py#L56).
 - **`LLM_KWARGS`**: Json formatted dict of additional keyword args to be passed to the LLM provider class when instantiating it. This is primarily useful for clients like Ollama that allow for additional keyword arguments such as `num_ctx` that influence the inference calls.
@@ -86,11 +86,11 @@ Below is a list of current supported options:
 
 ## Deep Research Configuration
 
-The deep research parameters allow you to fine-tune how GPT Researcher explores complex topics that require extensive knowledge gathering. These parameters work together to determine the thoroughness and efficiency of the research process:
+The deep research parameters allow you to fine-tune how Auto_Research_Engine explores complex topics that require extensive knowledge gathering. These parameters work together to determine the thoroughness and efficiency of the research process:
 
 - **`DEEP_RESEARCH_BREADTH`**: Controls how many parallel research paths are explored simultaneously. A higher value (e.g., 5) causes the researcher to investigate more diverse subtopics at each step, resulting in broader coverage but potentially less focus on core themes. The default value of `3` provides a balanced approach between breadth and depth.
 
-- **`DEEP_RESEARCH_DEPTH`**: Determines how many sequential search iterations GPT Researcher performs for each research path. A higher value (e.g., 3-4) allows for following citation trails and diving deeper into specialized information, but increases research time substantially. The default value of `2` ensures reasonable depth while maintaining practical completion times.
+- **`DEEP_RESEARCH_DEPTH`**: Determines how many sequential search iterations Auto_Research_Engine performs for each research path. A higher value (e.g., 3-4) allows for following citation trails and diving deeper into specialized information, but increases research time substantially. The default value of `2` ensures reasonable depth while maintaining practical completion times.
 
 - **`DEEP_RESEARCH_CONCURRENCY`**: Sets how many concurrent operations can run during deep research. Higher values speed up the research process on capable systems but may increase API rate limit issues or resource consumption. The default value of `4` is suitable for most environments, but can be increased on systems with more resources or decreased if you experience performance issues.
 

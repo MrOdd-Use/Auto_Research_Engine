@@ -20,11 +20,11 @@ What makes deep research truly exciting is its potential to democratize advanced
 
 However, a key limitation in the current market is accessibility - the most powerful deep research tools remain locked behind expensive paywalls or closed systems, putting them out of reach for many researchers, students, and smaller organizations who could benefit most from these capabilities.
 
-## Introducing GPT Researcher Deep Research ✨
+## Introducing Auto_Research_Engine Deep Research ✨
 
-We're thrilled to announce our answer to this trend: **GPT Researcher Deep Research** - an advanced open-source recursive research system that explores topics with depth and breadth, all while maintaining cost-effectiveness and transparency.
+We're thrilled to announce our answer to this trend: **Auto_Research_Engine Deep Research** - an advanced open-source recursive research system that explores topics with depth and breadth, all while maintaining cost-effectiveness and transparency.
 
-[GPT Researcher](https://github.com/MrOdd-Use/Auto_Research_Engine) Deep Research not only matches the capabilities of the industry giants but exceeds them in several key metrics:
+[Auto_Research_Engine](https://github.com/MrOdd-Use/Auto_Research_Engine) Deep Research not only matches the capabilities of the industry giants but exceeds them in several key metrics:
 
 - **Cost-effective**: Each deep research operation costs approximately $0.40 (using `o3-mini` on `"high"` reasoning effort)
 - **Time-efficient**: Complete research in around 5 minutes
@@ -34,7 +34,7 @@ We're thrilled to announce our answer to this trend: **GPT Researcher Deep Resea
 
 ## How It Works: The Recursive Research Tree
 
-What makes GPT Researcher's deep research so powerful is its tree-like exploration pattern that combines breadth and depth in an intelligent, recursive approach:
+What makes Auto_Research_Engine's deep research so powerful is its tree-like exploration pattern that combines breadth and depth in an intelligent, recursive approach:
 
 ![Research Flow Diagram](https://github.com/user-attachments/assets/eba2d94b-bef3-4f8d-bbc0-f15bd0a40968)
 
@@ -44,7 +44,7 @@ What makes GPT Researcher's deep research so powerful is its tree-like explorati
 4. **Context Management**: Automatically aggregates and synthesizes findings across all branches
 5. **Real-time Tracking**: Provides updates on research progress across both breadth and depth dimensions
 
-Imagine deploying a team of AI researchers, each following their own research path while collaborating to build a comprehensive understanding of your topic. That's the power of GPT Researcher's deep research approach.
+Imagine deploying a team of AI researchers, each following their own research path while collaborating to build a comprehensive understanding of your topic. That's the power of Auto_Research_Engine's deep research approach.
 
 ## Getting Started in Minutes
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
 ## Under the Hood: How Deep Research Works
 
-Looking at the codebase reveals the sophisticated system that powers GPT Researcher's deep research capabilities:
+Looking at the codebase reveals the sophisticated system that powers Auto_Research_Engine's deep research capabilities:
 
 ### 1. Query Generation and Planning
 
@@ -152,7 +152,7 @@ This ensures the most relevant information is retained while respecting model co
 
 ## Customizing Your Research Experience
 
-One of the key advantages of GPT Researcher's open-source approach is full customizability. You can tailor the research process to your specific needs through several configuration options:
+One of the key advantages of Auto_Research_Engine's open-source approach is full customizability. You can tailor the research process to your specific needs through several configuration options:
 
 ```yaml
 deep_research_breadth: 4    # Number of parallel research paths
@@ -174,7 +174,7 @@ researcher = GPTResearcher(
 
 ## Real-time Progress Tracking
 
-For applications requiring visibility into the research process, GPT Researcher provides detailed progress tracking:
+For applications requiring visibility into the research process, Auto_Research_Engine provides detailed progress tracking:
 
 ```python
 class ResearchProgress:
@@ -191,7 +191,7 @@ This allows you to build interfaces that show research progress in real-time - p
 
 ## Why This Matters: The Impact of Deep Research
 
-The democratization of deep research capabilities through open-source tools like GPT Researcher represents a paradigm shift in how we process and analyze information. Benefits include:
+The democratization of deep research capabilities through open-source tools like Auto_Research_Engine represents a paradigm shift in how we process and analyze information. Benefits include:
 
 1. **Deeper insights**: Uncover connections and patterns that surface-level research would miss
 2. **Time savings**: Automate hours or days of manual research into minutes
@@ -208,9 +208,9 @@ Ready to experience the power of deep research in your projects? Here's how to g
 3. **Configuration**: Customize parameters based on your research needs
 4. **Implementation**: Use the example code to integrate into your application
 
-More detailed instructions and examples can be found in the [GPT Researcher documentation](https://docs.gptr.dev/docs/Auto_Research_Engine/gptr/deep_research)
+More detailed instructions and examples can be found in the [Auto_Research_Engine documentation](https://docs.gptr.dev/docs/Auto_Research_Engine/gptr/deep_research)
 
-Whether you're a developer building the next generation of research tools, an academic seeking deeper insights, or a business professional needing comprehensive analysis, GPT Researcher's deep research capabilities offer an accessible, powerful solution that rivals - and in many ways exceeds - the offerings from major AI companies.
+Whether you're a developer building the next generation of research tools, an academic seeking deeper insights, or a business professional needing comprehensive analysis, Auto_Research_Engine's deep research capabilities offer an accessible, powerful solution that rivals - and in many ways exceeds - the offerings from major AI companies.
 
 The future of AI-powered research is here, and it's open source. 🎉
 

@@ -63,7 +63,7 @@ class ChatRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs("outputs", exist_ok=True)
-    logger.info("GPT Researcher API ready - local mode (no database persistence)")
+    logger.info("Auto_Research_Engine API ready - local mode (no database persistence)")
     yield
     logger.info("Research API shutting down")
 

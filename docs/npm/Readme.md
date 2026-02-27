@@ -1,6 +1,6 @@
-# GPT Researcher
+# Auto_Research_Engine
 
-The Auto_Research_Engine npm package is a WebSocket client for interacting with GPT Researcher.
+The Auto_Research_Engine npm package is a WebSocket client for interacting with Auto_Research_Engine.
 
 <div align="center" id="top">
 
@@ -21,11 +21,11 @@ The Auto_Research_Engine npm package is a WebSocket client for interacting with 
 
 </div>
 
-# 🔎 GPT Researcher
+# 🔎 Auto_Research_Engine
 
-**GPT Researcher is an open deep research agent designed for both web and local research on any given task.** 
+**Auto_Research_Engine is an open deep research agent designed for both web and local research on any given task.** 
 
-The agent produces detailed, factual, and unbiased research reports with citations. GPT Researcher provides a full suite of customization options to create tailor made and domain specific research agents. Inspired by the recent [Plan-and-Solve](https://arxiv.org/abs/2305.04091) and [RAG](https://arxiv.org/abs/2005.11401) papers, GPT Researcher addresses misinformation, speed, determinism, and reliability by offering stable performance and increased speed through parallelized agent work.
+The agent produces detailed, factual, and unbiased research reports with citations. Auto_Research_Engine provides a full suite of customization options to create tailor made and domain specific research agents. Inspired by the recent [Plan-and-Solve](https://arxiv.org/abs/2305.04091) and [RAG](https://arxiv.org/abs/2005.11401) papers, Auto_Research_Engine addresses misinformation, speed, determinism, and reliability by offering stable performance and increased speed through parallelized agent work.
 
 **Our mission is to empower individuals and organizations with accurate, unbiased, and factual information through AI.**
 

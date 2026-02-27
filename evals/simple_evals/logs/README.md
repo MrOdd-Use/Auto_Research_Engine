@@ -1,6 +1,6 @@
 # Evaluation Results
 
-This directory contains historical evaluation results for GPT-Researcher using the SimpleQA methodology.
+This directory contains historical evaluation results for Auto_Research_Engine using the SimpleQA methodology.
 
 ## Latest Results
 
@@ -27,7 +27,7 @@ Evaluation run by [Kelly Abbott (kga245)](https://github.com/kga245)
 - Total Cost: $9.60
 - Average Cost per Query: $0.096
 
-This evaluation demonstrates strong performance in factual accuracy while maintaining reasonable cost efficiency. The high answer rate (99%) and accuracy (92.9%) suggest that GPT-Researcher is effective at finding and reporting accurate information.
+This evaluation demonstrates strong performance in factual accuracy while maintaining reasonable cost efficiency. The high answer rate (99%) and accuracy (92.9%) suggest that Auto_Research_Engine is effective at finding and reporting accurate information.
 
 ## Historical Context
 
