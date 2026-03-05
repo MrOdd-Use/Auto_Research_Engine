@@ -5,9 +5,10 @@ description = "Auto_Research_Engine is an autonomous agent designed for comprehe
 authors = ["Assaf Elovic <assaf.elovic@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+packages = [{include = "gpt_researcher"}]
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = ">=3.11,<3.13"
 aiofiles = ">=23.2.1"
 arxiv = ">=2.0.0"
 beautifulsoup4 = ">=4.12.2"
@@ -68,7 +69,7 @@ description = "Auto_Research_Engine is an autonomous agent designed for comprehe
 authors = [{ name = "Assaf Elovic", email = "assaf.elovic@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "aiofiles>=23.2.1",
     # Core dependencies
@@ -224,7 +225,6 @@ requirements-txt = [
     "langchain-cohere",
     "langchain-dashscope",
     "langchain-fireworks",
-    "langchain-gigachat",
     "langchain-google-genai",
     "langchain-google-vertexai",
     "langchain-groq",
