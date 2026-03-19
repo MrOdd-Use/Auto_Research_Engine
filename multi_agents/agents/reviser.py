@@ -25,7 +25,7 @@ class ReviserAgent:
         :return:
         """
         review = draft_state.get("review")
-        task = draft_state.get("task")
+        task = draft_state.get("task") or {}
         draft_report = draft_state.get("draft")
         checkpoint_note = (
             str(task.get("checkpoint_note") or "").strip()
@@ -44,9 +44,15 @@ class ReviserAgent:
             },
             {
                 "role": "user",
-                "content": f"""Draft:\n{draft_report}" + "Reviewer's notes:\n{review}\n\n
+                "content": f"""Draft:
+{draft_report}
+
+Reviewer's notes:
+{review}
+
 You have been tasked by your reviewer with revising the following draft, which was written by a non-expert.
 If you decide to follow the reviewer's notes, please write a new draft and make sure to address all of the points they raised.
+Please preserve the existing report structure and section headings unless the reviewer explicitly asks you to change them.
 Please keep all other aspects of the draft the same.
 {note_block}
 You MUST return nothing but a JSON in the following format:

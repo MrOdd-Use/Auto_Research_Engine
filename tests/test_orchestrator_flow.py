@@ -64,12 +64,46 @@ class _FakePublisherAgent:
         return {"report": self.generate_layout(state)}
 
 
+class _LayoutPublisherAgent:
+    def __init__(self):
+        self.run_calls = 0
+
+    def generate_layout(self, state):
+        final_draft = state.get("final_draft")
+        if isinstance(final_draft, str) and final_draft.strip():
+            return final_draft
+
+        headers = state.get("headers") or {}
+        return (
+            f"# {headers.get('title', 'Title')}\n"
+            f"## {headers.get('introduction', 'Introduction')}\n"
+            f"{state.get('introduction', '')}\n\n"
+            f"## {headers.get('conclusion', 'Conclusion')}\n"
+            f"{state.get('conclusion', '')}\n"
+        )
+
+    async def run(self, state):
+        self.run_calls += 1
+        return {"report": self.generate_layout(state)}
+
+
 class _FakeReviewerAccept:
     def __init__(self):
         self.calls = 0
 
     async def run(self, state):
         self.calls += 1
+        return {"review": None}
+
+
+class _CapturingReviewerAccept:
+    def __init__(self):
+        self.calls = 0
+        self.seen_drafts = []
+
+    async def run(self, state):
+        self.calls += 1
+        self.seen_drafts.append(state.get("draft"))
         return {"review": None}
 
 
@@ -111,6 +145,68 @@ class _FakeReviserIncremental:
             "draft": f"REVISED REPORT v{self.calls}",
             "revision_notes": f"Applied fixes v{self.calls}",
         }
+
+
+class _FreshWriterAgent:
+    async def run(self, state):
+        return {
+            "headers": {
+                "title": "Fresh Title",
+                "date": "Date",
+                "introduction": "Introduction",
+                "table_of_contents": "Table of Contents",
+                "conclusion": "Conclusion",
+                "references": "References",
+            },
+            "date": "01/01/2026",
+            "introduction": "Fresh intro",
+            "table_of_contents": "- A",
+            "conclusion": "Fresh conclusion",
+            "sources": ["- src"],
+        }
+
+
+class _LayoutReviser:
+    async def run(self, state):
+        return {
+            "draft": (
+                "# Fresh Title\n"
+                "### Introduction:\n"
+                "Revised intro\n\n"
+                "### Conclusion:\n"
+                "Revised conclusion\n"
+            ),
+            "revision_notes": "Updated the narrative",
+        }
+
+
+class _EchoClaimVerifier:
+    MAX_REFLEXION = 3
+
+    def __init__(self):
+        self.run_inputs = []
+
+    async def run(self, state):
+        introduction = state.get("introduction") or ""
+        self.run_inputs.append(introduction)
+        return {
+            "claim_confidence_report": [
+                {
+                    "claim_text": introduction,
+                    "confidence": "HIGH",
+                    "original_sentence": introduction,
+                    "domains": [],
+                    "note": "",
+                    "source_ids": [],
+                }
+            ] if introduction else [],
+            "suspicious_claims": [],
+            "hallucinated_claims": [],
+        }
+
+    def annotate_draft(self, draft, report):
+        claim_text = report[0]["claim_text"] if report else ""
+        return f"{draft}\n\nANNOTATED:{claim_text}"
 
 
 @pytest.mark.asyncio
@@ -211,3 +307,82 @@ async def test_orchestrator_main_flow_publishes_after_max_review_rounds():
     assert reviser.calls == 3
     assert publisher.run_calls == 1
     assert result["report"] == "REVISED REPORT v3"
+
+
+@pytest.mark.asyncio
+async def test_writer_rerun_discards_stale_final_draft_and_publishes_fresh_layout():
+    task = {
+        "query": "test",
+        "publish_formats": {"markdown": False, "pdf": False, "docx": False},
+        "follow_guidelines": True,
+        "guidelines": ["must be clear"],
+        "verbose": False,
+    }
+    chief = ChiefEditorAgent(task)
+
+    reviewer = _CapturingReviewerAccept()
+    publisher = _LayoutPublisherAgent()
+
+    chief._initialize_agents = lambda: {
+        "writer": _FreshWriterAgent(),
+        "editor": _FakeEditorAgent(),
+        "research": _FakeResearchAgent(),
+        "publisher": publisher,
+        "human": _FakeHumanAgent(),
+        "reviewer": reviewer,
+        "reviser": _FakeReviser(),
+    }
+
+    initial_state = {
+        "task": task,
+        "final_draft": "STALE REPORT",
+        "report": "STALE REPORT",
+        "review_iterations": 2,
+        "claim_confidence_report": [{"claim_text": "old"}],
+    }
+    result = await chief.run_research_task(
+        task_id="writer-rerun",
+        start_node="writer",
+        initial_state=initial_state,
+        include_human_feedback=False,
+    )
+
+    assert reviewer.calls == 1
+    assert reviewer.seen_drafts[0] != "STALE REPORT"
+    assert "Fresh intro" in reviewer.seen_drafts[0]
+    assert "Fresh intro" in result["report"]
+    assert "STALE REPORT" not in result["report"]
+
+
+@pytest.mark.asyncio
+async def test_reviser_output_refreshes_claim_report_before_annotation():
+    task = {
+        "query": "test",
+        "publish_formats": {"markdown": False, "pdf": False, "docx": False},
+        "follow_guidelines": True,
+        "guidelines": ["must be clear"],
+        "verbose": False,
+    }
+    chief = ChiefEditorAgent(task)
+
+    verifier = _EchoClaimVerifier()
+    publisher = _LayoutPublisherAgent()
+    reviewer = _FakeReviewerReviseThenAccept()
+
+    chief._initialize_agents = lambda: {
+        "writer": _FreshWriterAgent(),
+        "editor": _FakeEditorAgent(),
+        "research": _FakeResearchAgent(),
+        "publisher": publisher,
+        "human": _FakeHumanAgent(),
+        "reviewer": reviewer,
+        "reviser": _LayoutReviser(),
+        "claim_verifier": verifier,
+    }
+
+    result = await chief.run_research_task(task_id="refresh-claim-report")
+
+    assert reviewer.calls == 2
+    assert verifier.run_inputs[0] == "Fresh intro"
+    assert verifier.run_inputs[-1] == "Revised intro"
+    assert "ANNOTATED:Revised intro" in result["report"]

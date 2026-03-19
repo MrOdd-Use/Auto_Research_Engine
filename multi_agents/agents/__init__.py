@@ -1,6 +1,7 @@
 from .researcher import ResearchAgent
 from .scrap import ScrapAgent
 from .check_data import CheckDataAgent
+from .claim_verifier import ClaimVerifierAgent
 from .writer import WriterAgent
 from .publisher import PublisherAgent
 from .reviser import ReviserAgent
@@ -16,10 +17,11 @@ __all__ = [
     "ResearchAgent",
     "ScrapAgent",
     "CheckDataAgent",
+    "ClaimVerifierAgent",
     "WriterAgent",
     "EditorAgent",
     "PublisherAgent",
     "ReviserAgent",
     "ReviewerAgent",
-    "HumanAgent"
+    "HumanAgent",
 ]

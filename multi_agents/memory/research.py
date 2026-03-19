@@ -24,4 +24,12 @@ class ResearchState(TypedDict):
     introduction: str
     conclusion: str
     sources: List[str]
+    claim_annotations: Optional[list]
     report: str
+    # Claim confidence
+    claim_confidence_report: Optional[list]
+    claim_reflexion_iterations: int
+    source_index: Optional[dict]
+    indexed_research_data: Optional[str]
+    # Review diff tracking
+    _draft_before_revision: Optional[str]

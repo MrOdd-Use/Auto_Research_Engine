@@ -1,9 +1,63 @@
+import difflib
+from typing import List, Optional
+
 from .utils.views import print_agent_output
 from .utils.llms import call_model
 
 TEMPLATE = """You are an expert research article reviewer. \
-Your goal is to review research drafts and provide feedback to the reviser only based on specific guidelines. \
+Your goal is to review research drafts and provide feedback to the reviser based on guidelines and factual accuracy. \
 """
+
+SOURCE_VERIFY_INSTRUCTION = """
+## Source Verification
+
+The following paragraphs were modified or added by the reviser compared to the previous draft.
+Check each factual claim against the evidence sources below. If a claim has NO supporting evidence
+in the sources, flag it as: [HALLUCINATION] "<the claim>" — no source supports this, please remove or rewrite.
+
+Modified paragraphs:
+{changed_paragraphs}
+
+Evidence Sources (condensed):
+{sources_text}
+"""
+
+FULL_DRAFT_SOURCE_VERIFY_INSTRUCTION = """
+## Source Verification
+
+Review the full draft above against the evidence sources below.
+For every factual claim in the draft, check whether at least one evidence source supports it.
+If a claim has NO supporting evidence in the sources, flag it as:
+[HALLUCINATION] "<the claim>" — no source supports this, please remove or rewrite.
+
+Evidence Sources (condensed):
+{sources_text}
+"""
+
+
+def _extract_changed_paragraphs(previous: str, current: str) -> List[str]:
+    """Extract paragraphs that were added or modified in the current version."""
+    previous_lines = previous.splitlines()
+    current_lines = current.splitlines()
+    differ = difflib.unified_diff(previous_lines, current_lines, lineterm="")
+    changed: List[str] = []
+    for line in differ:
+        if line.startswith("+") and not line.startswith("+++"):
+            content = line[1:].strip()
+            if content:
+                changed.append(content)
+    return changed
+
+
+def _build_condensed_sources(source_index: dict, limit: int = 50) -> str:
+    """Build a condensed source list for the review prompt."""
+    entries = sorted(source_index.items(), key=lambda x: int(x[0][1:]))[:limit]
+    lines = []
+    for key, info in entries:
+        snippet = info.get("content", "")[:200]
+        domain = info.get("domain", "")
+        lines.append(f"[{key}]({domain}) {snippet}")
+    return "\n".join(lines)
 
 
 class ReviewerAgent:
@@ -13,14 +67,13 @@ class ReviewerAgent:
         self.headers = headers or {}
 
     async def review_draft(self, draft_state: dict):
-        """
-        Review a draft article
-        :param draft_state:
-        :return:
-        """
-        task = draft_state.get("task")
-        guidelines = "- ".join(guideline for guideline in task.get("guidelines"))
+        """Review a draft article for guideline compliance and factual accuracy."""
+        task = draft_state.get("task") or {}
+        guidelines = "- ".join(guideline for guideline in task.get("guidelines", []))
         revision_notes = draft_state.get("revision_notes")
+        source_index = draft_state.get("source_index") or {}
+        previous_draft = draft_state.get("previous_draft") or ""
+        current_draft = draft_state.get("draft") or ""
         checkpoint_note = (
             str(task.get("checkpoint_note") or "").strip()
             if task.get("checkpoint_target") == "reviewer"
@@ -38,13 +91,29 @@ Please provide additional feedback ONLY if critical since the reviser has alread
 If you think the article is sufficient or that non critical revisions are required, please aim to return None.
 """
 
+        # Build source verification block if source evidence is available.
+        source_verify_block = ""
+        if source_index:
+            sources_text = _build_condensed_sources(source_index)
+            changed = _extract_changed_paragraphs(previous_draft, current_draft) if previous_draft else []
+            if changed:
+                source_verify_block = SOURCE_VERIFY_INSTRUCTION.format(
+                    changed_paragraphs="\n".join(f"- {p}" for p in changed),
+                    sources_text=sources_text,
+                )
+            else:
+                source_verify_block = FULL_DRAFT_SOURCE_VERIFY_INSTRUCTION.format(
+                    sources_text=sources_text,
+                )
+
         review_prompt = f"""You have been tasked with reviewing the draft which was written by a non-expert based on specific guidelines.
 Please accept the draft if it is good enough to publish, or send it for revision, along with your notes to guide the revision.
 If not all of the guideline criteria are met, you should send appropriate revision notes.
-If the draft meets all the guidelines, please return None.
+If the draft meets all the guidelines and all factual claims are supported, please return None.
 {revise_prompt if revision_notes else ""}
 
-Guidelines: {guidelines}\nDraft: {draft_state.get("draft")}\n
+Guidelines: {guidelines}\nDraft: {current_draft}\n
+{source_verify_block}
 {note_block}
 """
         prompt = [
@@ -67,24 +136,48 @@ Guidelines: {guidelines}\nDraft: {draft_state.get("draft")}\n
                     f"Review feedback is: {response}...", agent="REVIEWER"
                 )
 
-        if "None" in response:
+        if self._is_empty_review_response(response):
             return None
         return response
 
     async def run(self, draft_state: dict):
-        task = draft_state.get("task")
-        guidelines = task.get("guidelines")
+        task = draft_state.get("task") or {}
         to_follow_guidelines = task.get("follow_guidelines")
-        review = None
-        if to_follow_guidelines:
-            print_agent_output(f"Reviewing draft...", agent="REVIEWER")
+        source_index = draft_state.get("source_index") or {}
 
-            if task.get("verbose"):
+        # Run review if guidelines are enabled or source evidence is available for factual auditing.
+        should_review = bool(to_follow_guidelines) or bool(source_index)
+
+        if should_review:
+            print_agent_output("Reviewing draft...", agent="REVIEWER")
+            if task.get("verbose") and to_follow_guidelines:
+                guidelines = task.get("guidelines")
                 print_agent_output(
                     f"Following guidelines {guidelines}...", agent="REVIEWER"
                 )
-
             review = await self.review_draft(draft_state)
         else:
-            print_agent_output(f"Ignoring guidelines...", agent="REVIEWER")
+            print_agent_output(
+                "Skipping review (no guidelines and no source evidence to audit)...",
+                agent="REVIEWER",
+            )
+            review = None
+
         return {"review": review}
+
+    @staticmethod
+    def _is_empty_review_response(response) -> bool:
+        if response is None:
+            return True
+        if isinstance(response, dict):
+            candidate = response.get("review")
+            if candidate is None:
+                candidate = response.get("feedback")
+            return ReviewerAgent._is_empty_review_response(candidate)
+        if isinstance(response, list):
+            return len(response) == 0
+
+        normalized = str(response).strip().lower()
+        normalized = normalized.strip("`'\" \n\t")
+        normalized = normalized.rstrip(".!?:;")
+        return normalized in {"none", "null", ""}

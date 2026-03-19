@@ -6,9 +6,10 @@ from .utils.llms import call_model
 sample_json = """
 {
   "table_of_contents": A table of contents in markdown syntax (using '-') based on the research headers and subheaders,
-  "introduction": An indepth introduction to the topic in markdown syntax and hyperlink references to relevant sources,
-  "conclusion": A conclusion to the entire research based on all research data in markdown syntax and hyperlink references to relevant sources,
-  "sources": A list with strings of all used source links in the entire research data in markdown syntax and apa citation format. For example: ['-  Title, year, Author [source url](source)', ...]
+  "introduction": An indepth introduction to the topic in markdown syntax and hyperlink references to relevant sources. Each factual claim MUST cite source IDs e.g. 'Revenue reached $128B [S1][S2].',
+  "conclusion": A conclusion to the entire research based on all research data in markdown syntax and hyperlink references to relevant sources. Each factual claim MUST cite source IDs.,
+  "sources": A list with strings of all used source links in the entire research data in markdown syntax and apa citation format. For example: ['-  Title, year, Author [source url](source)', ...],
+  "claim_annotations": A list of objects for each factual claim: [{"sentence": "the factual claim sentence", "source_ids": ["S1", "S2"], "section": "introduction"}, ...]
 }
 """
 
@@ -31,7 +32,9 @@ class WriterAgent:
 
     async def write_sections(self, research_state: dict):
         query = research_state.get("title")
-        data = research_state.get("research_data")
+        # Use indexed research data (with source IDs) if available, fallback to raw
+        data = research_state.get("indexed_research_data") or research_state.get("research_data")
+        has_source_index = bool(research_state.get("indexed_research_data"))
         task = research_state.get("task")
         follow_guidelines = task.get("follow_guidelines")
         guidelines = task.get("guidelines")
@@ -51,6 +54,18 @@ class WriterAgent:
             else ""
         )
 
+        citation_instruction = ""
+        if has_source_index:
+            citation_instruction = (
+                "IMPORTANT: The research data below includes source IDs like [S1], [S2], etc.\n"
+                "You MUST cite these source IDs after every factual claim. "
+                "For example: 'Revenue reached $128B [S1][S2].'\n"
+                "Only use source IDs that appear in the research data. "
+                "Do not invent facts not present in the research data.\n"
+                "If information for a topic is unavailable in the sources, "
+                "write: [该方面的知识无从得知]\n\n"
+            )
+
         prompt = [
             {
                 "role": "system",
@@ -63,6 +78,7 @@ class WriterAgent:
                 "content": f"Today's date is {datetime.now().strftime('%d/%m/%Y')}\n."
                 f"Query or Topic: {query}\n"
                 f"Research data: {str(data)}\n"
+                f"{citation_instruction}"
                 f"Your task is to write an in depth, well written and detailed "
                 f"introduction and conclusion to the research report based on the provided research data. "
                 f"Do not include headers in the results.\n"
