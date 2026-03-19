@@ -21,6 +21,16 @@ class ReviewerAgent:
         task = draft_state.get("task")
         guidelines = "- ".join(guideline for guideline in task.get("guidelines"))
         revision_notes = draft_state.get("revision_notes")
+        checkpoint_note = (
+            str(task.get("checkpoint_note") or "").strip()
+            if task.get("checkpoint_target") == "reviewer"
+            else ""
+        )
+        note_block = (
+            f"Additional rerun instruction for this review pass: {checkpoint_note}\n"
+            if checkpoint_note
+            else ""
+        )
 
         revise_prompt = f"""The reviser has already revised the draft based on your previous review notes with the following feedback:
 {revision_notes}\n
@@ -35,6 +45,7 @@ If the draft meets all the guidelines, please return None.
 {revise_prompt if revision_notes else ""}
 
 Guidelines: {guidelines}\nDraft: {draft_state.get("draft")}\n
+{note_block}
 """
         prompt = [
             {"role": "system", "content": TEMPLATE},

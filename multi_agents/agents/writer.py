@@ -35,6 +35,21 @@ class WriterAgent:
         task = research_state.get("task")
         follow_guidelines = task.get("follow_guidelines")
         guidelines = task.get("guidelines")
+        checkpoint_note = (
+            str(task.get("checkpoint_note") or "").strip()
+            if task.get("checkpoint_target") == "writer"
+            else ""
+        )
+        note_block = (
+            f"Additional rerun instruction for this writing pass: {checkpoint_note}\n"
+            if checkpoint_note
+            else ""
+        )
+        guidelines_block = (
+            f"You must follow the guidelines provided: {guidelines}"
+            if follow_guidelines
+            else ""
+        )
 
         prompt = [
             {
@@ -53,7 +68,8 @@ class WriterAgent:
                 f"Do not include headers in the results.\n"
                 f"You MUST include any relevant sources to the introduction and conclusion as markdown hyperlinks -"
                 f"For example: 'This is a sample text. ([url website](url))'\n\n"
-                f"{f'You must follow the guidelines provided: {guidelines}' if follow_guidelines else ''}\n"
+                f"{note_block}"
+                f"{guidelines_block}\n"
                 f"You MUST return nothing but a JSON in the following format (without json markdown):\n"
                 f"{sample_json}\n\n",
             },
@@ -67,6 +83,12 @@ class WriterAgent:
         return response
 
     async def revise_headers(self, task: dict, headers: dict):
+        checkpoint_note = (
+            str(task.get("checkpoint_note") or "").strip()
+            if task.get("checkpoint_target") == "writer"
+            else ""
+        )
+        note_block = f"Additional rerun instruction: {checkpoint_note}\n" if checkpoint_note else ""
         prompt = [
             {
                 "role": "system",
@@ -79,6 +101,7 @@ Your sole purpose is to revise the headers data based on the given guidelines.""
 You are to follow the guidelines but the values should be in simple strings, ignoring all markdown syntax.
 You must return nothing but a JSON in the same format as given in headers data.
 Guidelines: {task.get("guidelines")}\n
+{note_block}
 Headers Data: {headers}\n
 """,
             },

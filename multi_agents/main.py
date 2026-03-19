@@ -35,12 +35,35 @@ def open_task():
 
     return task
 
-async def run_research_task(query, websocket=None, stream_output=None, tone=Tone.Objective, headers=None):
+async def run_research_task(
+    query,
+    websocket=None,
+    stream_output=None,
+    tone=Tone.Objective,
+    headers=None,
+    session_recorder=None,
+    start_node="browser",
+    initial_state=None,
+    include_human_feedback=True,
+    note=None,
+    selected_section_key=None,
+    section_start_node=None,
+    section_state_before=None,
+):
     task = open_task()
     task["query"] = query
 
     chief_editor = ChiefEditorAgent(task, websocket, stream_output, tone, headers)
-    research_report = await chief_editor.run_research_task()
+    research_report = await chief_editor.run_research_task(
+        session_recorder=session_recorder,
+        start_node=start_node,
+        initial_state=initial_state,
+        include_human_feedback=include_human_feedback,
+        note=note,
+        selected_section_key=selected_section_key,
+        section_start_node=section_start_node,
+        section_state_before=section_state_before,
+    )
 
     if websocket and stream_output:
         await stream_output("logs", "research_report", research_report, websocket)

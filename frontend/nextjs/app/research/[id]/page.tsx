@@ -3,8 +3,9 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useResearchHistoryContext } from "@/hooks/ResearchHistoryContext";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { preprocessOrderedData } from "@/utils/dataProcessing";
-import { ChatBoxSettings, Data, ChatData, ChatMessage, QuestionData } from "@/types/data";
+import { ChatBoxSettings, Data, ChatData, ChatMessage, QuestionData, WorkflowResponse } from "@/types/data";
 import { toast } from "react-hot-toast";
 import { getAppropriateLayout } from "@/utils/getLayout";
 
@@ -15,6 +16,7 @@ import CopilotResearchContent from "@/components/research/CopilotResearchContent
 import NotFoundContent from "@/components/research/NotFoundContent";
 import LoadingDots from "@/components/LoadingDots";
 import ResearchSidebar from "@/components/ResearchSidebar";
+import WorkflowPanel from "@/components/WorkflowPanel";
 
 // Import mobile components
 import MobileResearchContent from "@/components/mobile/MobileResearchContent";
@@ -23,6 +25,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { id } = params;
   const [loading, setLoading] = useState(true);
+  const [workflowRunning, setWorkflowRunning] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [chatPromptValue, setChatPromptValue] = useState("");
@@ -33,6 +36,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
   const [isProcessingChat, setIsProcessingChat] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [workflowData, setWorkflowData] = useState<WorkflowResponse | null>(null);
   const [chatBoxSettings, setChatBoxSettings] = useState<ChatBoxSettings>(() => {
     // Default settings
     const defaultSettings = {
@@ -70,6 +74,9 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
   const [fetchAttempted, setFetchAttempted] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const toastShownRef = useRef(false);
+  const rerunBackupRef = useRef<{ answer: string; orderedData: Data[]; workflow: WorkflowResponse | null } | null>(null);
+  const [showHumanFeedback, setShowHumanFeedback] = useState(false);
+  const [questionForHuman, setQuestionForHuman] = useState("");
 
   const { 
     history,
@@ -79,6 +86,48 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
     updateResearch,
     deleteResearch
   } = useResearchHistoryContext();
+
+  const loadWorkflow = async (sessionId?: string) => {
+    try {
+      const suffix = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+      const response = await fetch(`/api/reports/${id}/workflow${suffix}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load workflow: ${response.status}`);
+      }
+      const data: WorkflowResponse = await response.json();
+      setWorkflowData(data);
+      if (data.selected_session) {
+        setAnswer(data.selected_session.answer || '');
+        setOrderedData(Array.isArray(data.selected_session.ordered_data) ? data.selected_session.ordered_data : []);
+      }
+      return data;
+    } catch (error) {
+      console.error('Error loading workflow:', error);
+      return null;
+    }
+  };
+
+  const websocketRef = useRef(useWebSocket(
+    setOrderedData,
+    setAnswer,
+    setWorkflowRunning,
+    setShowHumanFeedback,
+    setQuestionForHuman,
+    {
+      onPath: async () => {
+        await loadWorkflow();
+      },
+      onError: () => {
+        setWorkflowRunning(false);
+        if (rerunBackupRef.current) {
+          setAnswer(rerunBackupRef.current.answer);
+          setOrderedData(rerunBackupRef.current.orderedData);
+          setWorkflowData(rerunBackupRef.current.workflow);
+        }
+      }
+    }
+  ));
+  const { initializeWebSocket } = websocketRef.current;
 
   // Toggle sidebar
   const toggleSidebar = () => {
@@ -156,6 +205,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             setAnswer(data.report.answer || '');
             setOrderedData(Array.isArray(data.report.orderedData) ? data.report.orderedData : []);
             setCurrentResearchId(id);
+            await loadWorkflow();
             setLoading(false);
           }
         } else if (response.status === 500) {
@@ -177,6 +227,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             setAnswer(localItem.answer || '');
             setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
             setCurrentResearchId(id);
+            await loadWorkflow();
             setLoading(false);
             return;
           }
@@ -205,6 +256,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
           setCurrentResearchId(id);
+          await loadWorkflow();
           setLoading(false);
           return;
         }
@@ -242,6 +294,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
           setCurrentResearchId(id);
+          await loadWorkflow();
           setLoading(false);
         } catch (error) {
           console.error('Error saving to backend:', error);
@@ -251,6 +304,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
           setCurrentResearchId(id);
+          await loadWorkflow();
           setLoading(false);
         }
       }
@@ -421,6 +475,30 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
     router.push('/');
   };
 
+  const handleSelectSession = async (sessionId: string) => {
+    await loadWorkflow(sessionId);
+  };
+
+  const handleRerunCheckpoint = (checkpointId: string, note: string) => {
+    if (!currentResearchId) return;
+    rerunBackupRef.current = {
+      answer,
+      orderedData,
+      workflow: workflowData,
+    };
+    setWorkflowRunning(true);
+    setAnswer("");
+    setOrderedData([{ type: 'question', content: question } as QuestionData]);
+    initializeWebSocket("", chatBoxSettings, {
+      command: 'rerun',
+      payload: {
+        report_id: currentResearchId,
+        checkpoint_id: checkpointId,
+        note,
+      },
+    });
+  };
+
   const handleCopyUrl = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url)
@@ -467,7 +545,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
       <MobileResearchContent
         orderedData={orderedData}
         answer={answer}
-        loading={false}
+        loading={workflowRunning}
         isStopped={isStopped}
         chatPromptValue={chatPromptValue}
         setChatPromptValue={setChatPromptValue}
@@ -530,7 +608,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
 
   // Normal state - research found on desktop
   return getAppropriateLayout({
-    loading: false,
+    loading: workflowRunning,
     isStopped,
     showResult: true,
     onNewResearch: handleNewResearch,
@@ -554,7 +632,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             answer={answer}
             allLogs={allLogs}
             chatBoxSettings={chatBoxSettings}
-            loading={false}
+            loading={workflowRunning}
             isStopped={isStopped}
             promptValue=""
             chatPromptValue={chatPromptValue}
@@ -575,7 +653,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             answer={answer}
             allLogs={allLogs}
             chatBoxSettings={chatBoxSettings}
-            loading={false}
+            loading={workflowRunning}
             isInChatMode={true}
             isStopped={isStopped}
             promptValue=""
@@ -590,6 +668,13 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             isProcessingChat={isProcessingChat}
           />
         )}
+
+        <WorkflowPanel
+          workflow={workflowData}
+          loading={workflowRunning}
+          onSelectSession={handleSelectSession}
+          onRerunCheckpoint={handleRerunCheckpoint}
+        />
       </div>
     )
   });

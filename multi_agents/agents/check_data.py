@@ -52,6 +52,11 @@ class CheckDataAgent:
         topic = str(draft_state.get("topic") or "").strip() or "Main Research Focus"
         research_context = draft_state.get("research_context") or {}
         scrap_packet = draft_state.get("scrap_packet") or {}
+        checkpoint_note = (
+            str(task.get("checkpoint_note") or "").strip()
+            if task.get("checkpoint_target") == "check_data"
+            else ""
+        )
         iteration_index = self._normalize_iteration(draft_state.get("iteration_index"))
         max_retries = self._normalize_max_retries(task.get("check_data_max_retries"))
         coverage_report = self._build_coverage_report(scrap_packet, research_context)
@@ -67,7 +72,7 @@ class CheckDataAgent:
 
         try:
             segments = self._extract_segments(scrap_packet)
-            claims = self._atomic_deconstruct(topic, research_context)
+            claims = self._atomic_deconstruct(topic, research_context, checkpoint_note=checkpoint_note)
             precheck = self._constraint_guard(claims, segments)
             deep_eval_report = self._run_deep_eval(claims, segments, precheck)
 
@@ -189,10 +194,10 @@ class CheckDataAgent:
                     segments.append(content)
         return segments
 
-    def _atomic_deconstruct(self, topic: str, research_context: dict) -> dict:
-        subject = self._extract_subject(topic, research_context)
+    def _atomic_deconstruct(self, topic: str, research_context: dict, checkpoint_note: str = "") -> dict:
+        subject = self._extract_subject(topic, research_context, checkpoint_note)
         time_constraint = self._extract_time_constraint(topic)
-        metric = self._extract_metric(topic, research_context)
+        metric = self._extract_metric(topic, research_context, checkpoint_note)
         negative_constraints = self._extract_negative_constraints(topic)
         return {
             "subject": subject,
@@ -201,7 +206,7 @@ class CheckDataAgent:
             "negative_constraints": negative_constraints,
         }
 
-    def _extract_subject(self, topic: str, research_context: dict) -> str:
+    def _extract_subject(self, topic: str, research_context: dict, checkpoint_note: str = "") -> str:
         key_points = research_context.get("key_points") or []
         candidates: List[str] = []
         for point in key_points:
@@ -209,6 +214,8 @@ class CheckDataAgent:
             if text:
                 candidates.append(text)
         candidates.append(topic)
+        if checkpoint_note:
+            candidates.append(checkpoint_note)
 
         for text in candidates:
             match = re.search(r"\b([A-Z][A-Za-z0-9&\-.]{1,})\b", text)
@@ -231,10 +238,10 @@ class CheckDataAgent:
             return y_match.group(1)
         return ""
 
-    def _extract_metric(self, topic: str, research_context: dict) -> str:
+    def _extract_metric(self, topic: str, research_context: dict, checkpoint_note: str = "") -> str:
         description = str(research_context.get("description") or "")
         key_points = " ".join(str(x or "") for x in (research_context.get("key_points") or []))
-        source_text = f"{topic} {description} {key_points}".lower()
+        source_text = f"{topic} {description} {key_points} {checkpoint_note}".lower()
         metric_candidates = [
             "revenue",
             "profit",

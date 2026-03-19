@@ -1,5 +1,6 @@
 from datetime import datetime
 import asyncio
+import copy
 import logging
 import re
 import os
@@ -17,6 +18,7 @@ from .scrap import ScrapAgent
 from .check_data import CheckDataAgent
 from .reviewer import ReviewerAgent
 from .reviser import ReviserAgent
+from multi_agents.workflow_session import WorkflowSessionRecorder
 
 
 _PLANNING_SYSTEM_PROMPT = (
@@ -106,15 +108,21 @@ class EditorAgent:
 
     # ── Parallel Research ─────────────────────────────────────────────────
 
-    async def run_parallel_research(self, research_state: Dict[str, Any]) -> Dict[str, Any]:
+    async def run_parallel_research(
+        self,
+        research_state: Dict[str, Any],
+        session_recorder: WorkflowSessionRecorder | None = None,
+        selected_section_key: str | None = None,
+        start_from_section_node: str | None = None,
+        section_state_before: Dict[str, Any] | None = None,
+        note: str | None = None,
+    ) -> Dict[str, Any]:
         """
         Execute parallel research tasks for each section.
 
         Reads enriched `section_details` when available, falling back to flat `sections`.
         """
         agents = self._initialize_agents()
-        workflow = self._create_workflow(agents)
-        chain = workflow.compile()
 
         task = research_state.get("task") or {}
         max_sections = self._normalize_max_sections(task.get("max_sections"))
@@ -128,18 +136,33 @@ class EditorAgent:
             section_details = [
                 {"header": q, "description": "", "key_points": [], "research_queries": []}
                 for q in queries
-            ]
+        ]
 
         self._log_parallel_research([s["header"] for s in section_details])
 
         audit_feedback_queue = research_state.get("audit_feedback_queue") or task.get("audit_feedback_queue") or []
         shared_extra_hints = research_state.get("extra_hints") or task.get("extra_hints")
+        existing_research_results = list(research_state.get("research_data") or [])
+        existing_scrap_packets = list(research_state.get("scrap_packets") or [])
+        existing_check_data_reports = list(research_state.get("check_data_reports") or [])
 
-        final_drafts = [
-            chain.ainvoke(
-                self._create_task_input(
+        async def run_one_section(idx: int, section_detail: Dict[str, Any]) -> Dict[str, Any]:
+            section_key = self._make_section_key(idx, section_detail.get("header", ""))
+            if selected_section_key and section_key != selected_section_key:
+                return {
+                    "draft": existing_research_results[idx] if idx < len(existing_research_results) else {},
+                    "scrap_packet": existing_scrap_packets[idx] if idx < len(existing_scrap_packets) else None,
+                    "check_data_verdict": (
+                        existing_check_data_reports[idx] if idx < len(existing_check_data_reports) else None
+                    ),
+                }
+
+            task_input = (
+                copy.deepcopy(section_state_before)
+                if selected_section_key and section_key == selected_section_key and section_state_before
+                else self._create_task_input(
                     research_state=research_state,
-                    section_detail=section_detail,
+                    section_detail={**section_detail, "_section_index": idx},
                     title=title,
                     audit_feedback=(
                         audit_feedback_queue[idx]
@@ -147,19 +170,26 @@ class EditorAgent:
                         else (audit_feedback_queue[0] if audit_feedback_queue else None)
                     ),
                     extra_hints=shared_extra_hints,
-                ),
-                config={"tags": ["Auto_Research_Engine"]},
+                )
             )
-            for idx, section_detail in enumerate(section_details)
-        ]
-        gathered_results = await asyncio.gather(*final_drafts)
-        research_results = [result["draft"] for result in gathered_results]
-        scrap_packets = [result.get("scrap_packet") for result in gathered_results if result.get("scrap_packet")]
-        check_data_reports = [
-            result.get("check_data_verdict")
-            for result in gathered_results
-            if result.get("check_data_verdict")
-        ]
+            if note and selected_section_key and section_key == selected_section_key:
+                task_input = self._inject_section_note(task_input, start_from_section_node or "researcher", note)
+
+            return await self._run_section_workflow(
+                draft_state=task_input,
+                agents=agents,
+                section_index=idx,
+                section_title=section_detail.get("header", ""),
+                session_recorder=session_recorder,
+                start_node=start_from_section_node if selected_section_key and section_key == selected_section_key else None,
+            )
+
+        gathered_results = await asyncio.gather(
+            *[run_one_section(idx, section_detail) for idx, section_detail in enumerate(section_details)]
+        )
+        research_results = [result.get("draft") for result in gathered_results]
+        scrap_packets = [result.get("scrap_packet") for result in gathered_results]
+        check_data_reports = [result.get("check_data_verdict") for result in gathered_results]
 
         return {
             "research_data": research_results,
@@ -381,6 +411,10 @@ Return valid JSON only (no markdown fences) with this exact shape:
             "task": research_state.get("task"),
             "topic": section_detail["header"],
             "iteration_index": 1,
+            "section_key": self._make_section_key(
+                int(section_detail.get("_section_index", 0)),
+                section_detail["header"],
+            ),
             "research_context": {
                 "description": section_detail.get("description", ""),
                 "key_points": section_detail.get("key_points", []),
@@ -393,6 +427,150 @@ Return valid JSON only (no markdown fences) with this exact shape:
             "extra_hints": extra_hints,
             "headers": self.headers,
         }
+
+    async def _run_section_workflow(
+        self,
+        *,
+        draft_state: Dict[str, Any],
+        agents: Dict[str, Any],
+        section_index: int,
+        section_title: str,
+        session_recorder: WorkflowSessionRecorder | None = None,
+        start_node: str | None = None,
+    ) -> Dict[str, Any]:
+        state = copy.deepcopy(draft_state)
+        node = start_node or "researcher"
+
+        while True:
+            if node in {"researcher", "scrap"}:
+                state = await self._run_section_node(
+                    "scrap" if self.enable_scrap else "researcher",
+                    agents["scrap"].run_depth_scrap if self.enable_scrap else agents["research"].run_depth_research,
+                    state,
+                    section_index=section_index,
+                    section_title=section_title,
+                    session_recorder=session_recorder,
+                )
+                node = "check_data" if self.enable_scrap else "reviewer"
+                if not self.enable_scrap:
+                    continue
+
+            if self.enable_scrap:
+                state = await self._run_section_node(
+                    "check_data",
+                    agents["check_data"].run,
+                    state,
+                    section_index=section_index,
+                    section_title=section_title,
+                    session_recorder=session_recorder,
+                )
+                action = self._route_check_data(state)
+                if action == "retry":
+                    node = "researcher"
+                    continue
+                return state
+
+            if node == "reviewer":
+                state = await self._run_section_node(
+                    "reviewer",
+                    agents["reviewer"].run,
+                    state,
+                    section_index=section_index,
+                    section_title=section_title,
+                    session_recorder=session_recorder,
+                )
+                if state.get("review") is None:
+                    return state
+                node = "reviser"
+                continue
+
+            state = await self._run_section_node(
+                "reviser",
+                agents["reviser"].run,
+                state,
+                section_index=section_index,
+                section_title=section_title,
+                session_recorder=session_recorder,
+            )
+            node = "reviewer"
+
+    async def _run_section_node(
+        self,
+        node_name: str,
+        runner,
+        state: Dict[str, Any],
+        *,
+        section_index: int,
+        section_title: str,
+        session_recorder: WorkflowSessionRecorder | None = None,
+    ) -> Dict[str, Any]:
+        state_before = copy.deepcopy(state)
+        output_delta = await runner(state)
+        state.update(output_delta or {})
+        self._clear_section_note(state)
+
+        if session_recorder is not None:
+            await session_recorder.record_section_checkpoint(
+                section_index=section_index,
+                section_title=section_title,
+                node_name=node_name,
+                state_before=state_before,
+                output_delta=output_delta or {},
+                state_after=state,
+                summary=self._summarize_section_output(node_name, output_delta or {}, state),
+            )
+        return state
+
+    def _inject_section_note(self, draft_state: Dict[str, Any], node_name: str, note: str) -> Dict[str, Any]:
+        state = copy.deepcopy(draft_state)
+        task = state.setdefault("task", {})
+        task["checkpoint_note"] = note
+        task["checkpoint_target"] = node_name
+        if node_name in {"researcher", "scrap"}:
+            existing = str(state.get("extra_hints") or "").strip()
+            state["extra_hints"] = f"{existing}\n{note}".strip() if existing else note
+        elif node_name == "check_data":
+            context = state.setdefault("research_context", {})
+            description = str(context.get("description") or "").strip()
+            context["description"] = f"{description}\nOperator note: {note}".strip() if description else note
+        return state
+
+    def _clear_section_note(self, draft_state: Dict[str, Any]) -> None:
+        task = draft_state.get("task")
+        if isinstance(task, dict):
+            task.pop("checkpoint_note", None)
+            task.pop("checkpoint_target", None)
+
+    def _summarize_section_output(
+        self,
+        node_name: str,
+        output_delta: Dict[str, Any],
+        state_after: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if node_name in {"researcher", "scrap"}:
+            scrap_packet = output_delta.get("scrap_packet") or {}
+            return {
+                "iteration_index": output_delta.get("iteration_index") or state_after.get("iteration_index"),
+                "model_level": scrap_packet.get("model_level"),
+                "active_engines": scrap_packet.get("active_engines") or [],
+            }
+        if node_name == "check_data":
+            verdict = output_delta.get("check_data_verdict") or {}
+            deep_eval = verdict.get("deep_eval_report") or {}
+            return {
+                "action": output_delta.get("check_data_action"),
+                "status": verdict.get("status"),
+                "final_score": deep_eval.get("final_score"),
+            }
+        if node_name == "reviewer":
+            return {"accepted": state_after.get("review") is None}
+        if node_name == "reviser":
+            return {"has_revision_notes": bool(output_delta.get("revision_notes"))}
+        return {"keys": sorted(output_delta.keys())}
+
+    def _make_section_key(self, section_index: int, header: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().lower()).strip("_")
+        return f"section_{section_index}_{cleaned[:48] or 'section'}"
 
     @staticmethod
     def _route_check_data(draft_state: Dict[str, Any]) -> str:

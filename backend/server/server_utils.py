@@ -16,6 +16,7 @@ from datetime import datetime
 from fastapi import HTTPException
 import logging
 import hashlib
+from multi_agents.workflow_session import WorkflowSessionRecorder
 
 # Import chat agent
 try:
@@ -52,10 +53,12 @@ WINDOWS_RESERVED_NAMES = {
 
 class CustomLogsHandler:
     """Custom handler to capture streaming logs from the research process"""
-    def __init__(self, websocket, task: str):
+    def __init__(self, websocket, task: str, report_id: str | None = None, event_callback=None):
         self.logs = []
         self.websocket = websocket
-        sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
+        self.event_callback = event_callback
+        file_seed = report_id or sanitize_filename(f"task_{int(time.time())}_{task}")
+        sanitized_filename = sanitize_filename(str(file_seed))
         self.log_file = os.path.join("outputs", f"{sanitized_filename}.json")
         self.timestamp = datetime.now().isoformat()
         # Initialize log file with metadata
@@ -78,6 +81,13 @@ class CustomLogsHandler:
         # Send to websocket for real-time display
         if self.websocket:
             await self.websocket.send_json(data)
+        if self.event_callback:
+            try:
+                result = self.event_callback(dict(data))
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as exc:
+                logger.warning(f"Workflow event callback failed: {exc}")
             
         # Read current log file
         with open(self.log_file, 'r') as f:
@@ -137,13 +147,19 @@ class Researcher:
         }
 
 def sanitize_filename(filename: str) -> str:
-    # Split into components
-    prefix, timestamp, *task_parts = filename.split('_')
-    task = '_'.join(task_parts)
-    task_hash = hashlib.md5(task.encode('utf-8', errors='ignore')).hexdigest()[:10]
-            
-    # Reassemble and clean the filename
-    sanitized = f"{prefix}_{timestamp}_{task_hash}"
+    raw = str(filename or "").strip()
+    if not raw:
+        raw = f"task_{int(time.time())}_empty"
+
+    parts = raw.split("_")
+    if len(parts) >= 3:
+        prefix, timestamp, *task_parts = parts
+        task = "_".join(task_parts)
+        task_hash = hashlib.md5(task.encode("utf-8", errors="ignore")).hexdigest()[:10]
+        sanitized = f"{prefix}_{timestamp}_{task_hash}"
+    else:
+        stem_hash = hashlib.md5(raw.encode("utf-8", errors="ignore")).hexdigest()[:10]
+        sanitized = f"task_{int(time.time())}_{stem_hash}"
     return re.sub(r"[^\w\s-]", "", sanitized).strip()
 
 
@@ -204,10 +220,81 @@ def validate_file_path(file_path: str, base_dir: str) -> str:
     return target_real_path
 
 
+async def _upsert_report(manager, report_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    report_store = getattr(manager, "report_store", None)
+    if report_store is None:
+        return payload
+
+    existing = await report_store.get_report(report_id) or {}
+    now_ms = int(time.time() * 1000)
+    merged = {
+        **existing,
+        **payload,
+        "id": report_id,
+        "timestamp": now_ms,
+    }
+    await report_store.upsert_report(report_id, merged)
+    return merged
+
+
+async def _latest_successful_session_id(manager, report_id: str) -> str | None:
+    workflow_store = getattr(manager, "workflow_store", None)
+    if workflow_store is None:
+        return None
+    index = await workflow_store.get_index(report_id)
+    return index.get("last_successful_session_id")
+
+
+async def _resolve_rerun_request(manager, report_id: str, checkpoint_id: str) -> Dict[str, Any]:
+    workflow_store = getattr(manager, "workflow_store", None)
+    if workflow_store is None:
+        raise ValueError("Workflow store is not configured.")
+
+    found = await workflow_store.find_checkpoint(report_id, checkpoint_id)
+    if not found:
+        raise ValueError("Checkpoint not found for this report.")
+
+    base_session = found["session"]
+    checkpoint = found["checkpoint"]
+    scope = checkpoint.get("scope")
+
+    if scope == "global":
+        return {
+            "parent_session_id": base_session.get("session_id"),
+            "start_node": checkpoint.get("node_name"),
+            "initial_state": checkpoint.get("state_before") or {"task": {}},
+            "include_human_feedback": False,
+            "target": {
+                "scope": "global",
+                "node_name": checkpoint.get("node_name"),
+            },
+            "selected_section_key": None,
+            "section_start_node": None,
+            "section_state_before": None,
+        }
+
+    return {
+        "parent_session_id": base_session.get("session_id"),
+        "start_node": "researcher",
+        "initial_state": base_session.get("final_state") or {"task": {}},
+        "include_human_feedback": False,
+        "target": {
+            "scope": "section_node",
+            "node_name": checkpoint.get("node_name"),
+            "section_key": checkpoint.get("section_key"),
+            "section_title": checkpoint.get("section_title"),
+        },
+        "selected_section_key": checkpoint.get("section_key"),
+        "section_start_node": checkpoint.get("node_name"),
+        "section_state_before": checkpoint.get("state_before") or {},
+    }
+
+
 async def handle_start_command(websocket, data: str, manager):
     json_data = json.loads(data[6:])
     (
         task,
+        report_id,
         report_type,
         source_urls,
         document_urls,
@@ -237,8 +324,39 @@ async def handle_start_command(websocket, data: str, manager):
         })
         return
 
+    workflow_store = getattr(manager, "workflow_store", None)
+    if workflow_store is None:
+        raise ValueError("Workflow store is not configured.")
+
+    report_id = str(report_id or sanitize_filename(f"task_{int(time.time())}_{task}"))
+    session = await workflow_store.create_session(
+        report_id,
+        note=None,
+        target={"scope": "global", "node_name": "browser"},
+        task_query=task,
+    )
+    session_recorder = WorkflowSessionRecorder(workflow_store, report_id, session)
+
+    await _upsert_report(
+        manager,
+        report_id,
+        {
+            "question": task,
+            "status": "running",
+            "workflow_available": True,
+            "current_session_id": session_recorder.session_id,
+            "last_successful_session_id": await _latest_successful_session_id(manager, report_id),
+            "orderedData": session_recorder.session.get("ordered_data") or [],
+        },
+    )
+
     # Create logs handler with websocket and task
-    logs_handler = CustomLogsHandler(websocket, task)
+    logs_handler = CustomLogsHandler(
+        websocket,
+        task,
+        report_id=report_id,
+        event_callback=session_recorder.append_event,
+    )
     # Initialize log content with query
     await logs_handler.send_json({
         "query": task,
@@ -247,27 +365,186 @@ async def handle_start_command(websocket, data: str, manager):
         "report": ""
     })
 
-    sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
+    try:
+        report_result = await manager.start_streaming(
+            task,
+            report_type,
+            report_source,
+            source_urls,
+            document_urls,
+            tone,
+            websocket,
+            headers,
+            query_domains,
+            mcp_enabled,
+            mcp_strategy,
+            mcp_configs,
+            logs_handler=logs_handler,
+            session_recorder=session_recorder,
+            start_node="browser",
+            include_human_feedback=True,
+            report_id=report_id,
+        )
+        report = (
+            str(report_result.get("report", ""))
+            if isinstance(report_result, dict)
+            else str(report_result)
+        )
+        file_paths = await generate_report_files(report, report_id)
+        # Add JSON log path to file_paths
+        file_paths["json"] = os.path.relpath(logs_handler.log_file)
+        await session_recorder.append_path_event(file_paths)
+        await _upsert_report(
+            manager,
+            report_id,
+            {
+                "question": task,
+                "answer": report,
+                "orderedData": session_recorder.session.get("ordered_data") or [],
+                "status": "completed",
+                "workflow_available": True,
+                "current_session_id": session_recorder.session_id,
+                "last_successful_session_id": session_recorder.session_id,
+            },
+        )
+        await send_file_paths(websocket, file_paths)
+    except Exception:
+        await _upsert_report(
+            manager,
+            report_id,
+            {
+                "question": task,
+                "status": "failed",
+                "workflow_available": True,
+                "current_session_id": session_recorder.session_id,
+                "last_successful_session_id": await _latest_successful_session_id(manager, report_id),
+            },
+        )
+        raise
 
-    report = await manager.start_streaming(
-        task,
-        report_type,
-        report_source,
-        source_urls,
-        document_urls,
-        tone,
-        websocket,
-        headers,
-        query_domains,
-        mcp_enabled,
-        mcp_strategy,
-        mcp_configs,
+
+async def handle_rerun_command(websocket, data: str, manager):
+    json_data = json.loads(data[6:])
+    report_id = str(json_data.get("report_id") or "").strip()
+    checkpoint_id = str(json_data.get("checkpoint_id") or "").strip()
+    note = str(json_data.get("note") or "").strip() or None
+
+    if not report_id or not checkpoint_id:
+        await websocket.send_json(
+            {
+                "type": "logs",
+                "content": "error",
+                "output": "Missing report_id or checkpoint_id for rerun.",
+            }
+        )
+        return
+
+    rerun = await _resolve_rerun_request(manager, report_id, checkpoint_id)
+    base_task = ((rerun.get("initial_state") or {}).get("task") or {})
+    task = str(base_task.get("query") or "")
+    report_type = "multi_agents"
+    report_source = base_task.get("report_source") or "web"
+    tone = base_task.get("tone") or "Objective"
+    headers = base_task.get("headers") or {}
+    query_domains = base_task.get("query_domains") or []
+
+    workflow_store = getattr(manager, "workflow_store", None)
+    session = await workflow_store.create_session(
+        report_id,
+        parent_session_id=rerun.get("parent_session_id"),
+        rerun_from_checkpoint_id=checkpoint_id,
+        note=note,
+        target=rerun.get("target"),
+        task_query=task,
     )
-    report = str(report)
-    file_paths = await generate_report_files(report, sanitized_filename)
-    # Add JSON log path to file_paths
-    file_paths["json"] = os.path.relpath(logs_handler.log_file)
-    await send_file_paths(websocket, file_paths)
+    session_recorder = WorkflowSessionRecorder(workflow_store, report_id, session)
+
+    await _upsert_report(
+        manager,
+        report_id,
+        {
+            "question": task,
+            "status": "running",
+            "workflow_available": True,
+            "current_session_id": session_recorder.session_id,
+            "last_successful_session_id": await _latest_successful_session_id(manager, report_id),
+        },
+    )
+
+    logs_handler = CustomLogsHandler(
+        websocket,
+        task,
+        report_id=report_id,
+        event_callback=session_recorder.append_event,
+    )
+    await logs_handler.send_json(
+        {
+            "type": "logs",
+            "content": "rerun_start",
+            "output": f"Starting Rerun from Checkpoint for report {report_id} ({checkpoint_id})...",
+        }
+    )
+
+    try:
+        report_result = await manager.start_streaming(
+            task,
+            report_type,
+            report_source,
+            [],
+            [],
+            tone,
+            websocket,
+            headers,
+            query_domains,
+            False,
+            "fast",
+            [],
+            logs_handler=logs_handler,
+            session_recorder=session_recorder,
+            start_node=rerun.get("start_node") or "browser",
+            initial_state=rerun.get("initial_state") or {"task": base_task},
+            include_human_feedback=False,
+            note=note,
+            selected_section_key=rerun.get("selected_section_key"),
+            section_start_node=rerun.get("section_start_node"),
+            section_state_before=rerun.get("section_state_before"),
+            report_id=report_id,
+        )
+        report = (
+            str(report_result.get("report", ""))
+            if isinstance(report_result, dict)
+            else str(report_result)
+        )
+        file_paths = await generate_report_files(report, report_id)
+        file_paths["json"] = os.path.relpath(logs_handler.log_file)
+        await session_recorder.append_path_event(file_paths)
+        await _upsert_report(
+            manager,
+            report_id,
+            {
+                "question": task,
+                "answer": report,
+                "orderedData": session_recorder.session.get("ordered_data") or [],
+                "status": "completed",
+                "workflow_available": True,
+                "current_session_id": session_recorder.session_id,
+                "last_successful_session_id": session_recorder.session_id,
+            },
+        )
+        await send_file_paths(websocket, file_paths)
+    except Exception:
+        await _upsert_report(
+            manager,
+            report_id,
+            {
+                "question": task,
+                "status": "failed",
+                "workflow_available": True,
+                "current_session_id": session_recorder.session_id,
+                "last_successful_session_id": await _latest_successful_session_id(manager, report_id),
+            },
+        )
+        raise
 
 
 async def handle_human_feedback(data: str):
@@ -573,6 +850,11 @@ async def handle_websocket_communication(websocket, manager):
                     running_task = run_long_running_task(
                         handle_start_command(websocket, data, manager)
                     )
+                elif stripped.startswith("rerun"):
+                    logger.info("Processing rerun command")
+                    running_task = run_long_running_task(
+                        handle_rerun_command(websocket, data, manager)
+                    )
                 elif is_feedback_message:
                     logger.info("Queued human feedback without active research task")
                     await _enqueue_human_feedback(websocket, feedback_content)
@@ -599,6 +881,7 @@ async def handle_websocket_communication(websocket, manager):
 def extract_command_data(json_data: Dict) -> tuple:
     return (
         json_data.get("task"),
+        json_data.get("report_id"),
         json_data.get("report_type") or "multi_agents",
         json_data.get("source_urls"),
         json_data.get("document_urls"),

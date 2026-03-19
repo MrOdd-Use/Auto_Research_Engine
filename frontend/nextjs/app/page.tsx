@@ -324,6 +324,9 @@ export default function Home() {
   };
 
   const handleDisplayResult = async (newQuestion: string) => {
+    const newResearchId = uuidv4();
+    const initialOrderedData: Data[] = [{ type: 'question', content: newQuestion } as QuestionData];
+
     // Exit chat mode when starting a new research
     setIsInChatMode(false);
     setShowResult(true);
@@ -331,21 +334,17 @@ export default function Home() {
     setQuestion(newQuestion);
     setPromptValue("");
     setAnswer("");
-    setCurrentResearchId(null); // Reset current research ID for new research
-    setOrderedData((prevOrder) => [...prevOrder, { type: 'question', content: newQuestion }]);
+    setCurrentResearchId(newResearchId);
+    setOrderedData(initialOrderedData);
 
     // For mobile, use a simplified approach without websockets
     if (isMobile) {
       try {
-        // Create a new unique ID for this research
-        const newResearchId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-        
-        // First save the initial question to history - with proper parameters
-        const initialOrderedData: Data[] = [{ type: 'question', content: newQuestion } as QuestionData];
-        await saveResearch(
+        const savedResearchId = await saveResearch(
           newQuestion,  // question
           '',           // empty answer initially
-          initialOrderedData  // ordered data
+          initialOrderedData, // ordered data
+          newResearchId,
         );
         
         // Make direct API call to get response
@@ -387,13 +386,13 @@ export default function Home() {
           
           // Save the completed research with proper parameters
           await updateResearch(
-            newResearchId,    // id
+            savedResearchId,  // id
             chatAnswer,       // answer
             updatedOrderedData // ordered data
           );
           
           // Set current research ID so we can continue the conversation
-          setCurrentResearchId(newResearchId);
+          setCurrentResearchId(savedResearchId);
         } else {
           // Handle error
           setOrderedData(prevOrder => [...prevOrder, { 
@@ -417,11 +416,7 @@ export default function Home() {
     const storedConfig = localStorage.getItem('apiVariables');
     const apiVariables = storedConfig ? JSON.parse(storedConfig) : {};
     const langgraphHostUrl = apiVariables.LANGGRAPH_HOST_URL;
-
-    // Starting new research - tracking for redirection once complete
-    const newResearchStarted = Date.now().toString();
-    // We'll use this as a temporary ID to keep track of this research
-    const tempResearchId = `temp-${newResearchStarted}`;
+    await saveResearch(newQuestion, '', initialOrderedData, newResearchId);
 
     if (chatBoxSettings.report_type === 'multi_agents' && langgraphHostUrl) {
       let { streamResponse, host, thread_id } = await startLanggraphResearch(newQuestion, chatBoxSettings.report_source, langgraphHostUrl);
@@ -443,12 +438,15 @@ export default function Home() {
         previousChunk = chunk;
       }
     } else {
-      initializeWebSocket(newQuestion, chatBoxSettings);
+      initializeWebSocket(newQuestion, chatBoxSettings, { reportId: newResearchId });
     }
   };
 
   // Mobile-specific implementation for research
   const handleMobileDisplayResult = async (newQuestion: string) => {
+    const mobileResearchId = uuidv4();
+    const initialOrderedData: Data[] = [{ type: 'question', content: newQuestion } as QuestionData];
+
     // Update UI state
     setIsInChatMode(false);
     setShowResult(true);
@@ -456,23 +454,17 @@ export default function Home() {
     setQuestion(newQuestion);
     setPromptValue("");
     setAnswer("");
-    setCurrentResearchId(null);
+    setCurrentResearchId(mobileResearchId);
     
     // Start with just the question
-    setOrderedData([{ type: 'question', content: newQuestion } as QuestionData]);
+    setOrderedData(initialOrderedData);
     
     try {
-      // Generate unique ID for this research
-      const mobileResearchId = `mobile-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      
-      // Save initial research with just the question
-      const initialOrderedData: Data[] = [{ type: 'question', content: newQuestion } as QuestionData];
-      
-      // Save to research history
-      await saveResearch(
+      const savedResearchId = await saveResearch(
         newQuestion,  // question
         '',           // empty answer initially
-        initialOrderedData  // ordered data
+        initialOrderedData, // ordered data
+        mobileResearchId,
       );
       
       // Make direct API call instead of using websockets
@@ -523,13 +515,13 @@ export default function Home() {
         
         // Update research history with the answer
         await updateResearch(
-          mobileResearchId,
+          savedResearchId,
           responseContent,
           updatedOrderedData
         );
         
         // Set current research ID for future interactions
-        setCurrentResearchId(mobileResearchId);
+        setCurrentResearchId(savedResearchId);
       } else {
         // Handle error in response
         setOrderedData(prevData => [
@@ -743,11 +735,15 @@ export default function Home() {
       if (isUpdatingRef.current) return;
       
       if (showResult && !loading && answer && question && orderedData.length > 0) {
-        if (isInChatMode && currentResearchId) {
+        if (currentResearchId) {
           // Prevent redundant updates by checking if data has changed
           try {
             const currentResearch = await getResearchById(currentResearchId);
-            if (currentResearch && (currentResearch.answer !== answer || JSON.stringify(currentResearch.orderedData) !== JSON.stringify(orderedData))) {
+            if (
+              !currentResearch ||
+              currentResearch.answer !== answer ||
+              JSON.stringify(currentResearch.orderedData) !== JSON.stringify(orderedData)
+            ) {
               isUpdatingRef.current = true;
               await updateResearch(currentResearchId, answer, orderedData);
               // Reset the flag after a short delay to allow state updates to complete

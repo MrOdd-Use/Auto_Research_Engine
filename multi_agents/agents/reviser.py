@@ -27,6 +27,16 @@ class ReviserAgent:
         review = draft_state.get("review")
         task = draft_state.get("task")
         draft_report = draft_state.get("draft")
+        checkpoint_note = (
+            str(task.get("checkpoint_note") or "").strip()
+            if task.get("checkpoint_target") == "reviser"
+            else ""
+        )
+        note_block = (
+            f"Additional rerun instruction for this revision pass: {checkpoint_note}\n"
+            if checkpoint_note
+            else ""
+        )
         prompt = [
             {
                 "role": "system",
@@ -38,6 +48,7 @@ class ReviserAgent:
 You have been tasked by your reviewer with revising the following draft, which was written by a non-expert.
 If you decide to follow the reviewer's notes, please write a new draft and make sure to address all of the points they raised.
 Please keep all other aspects of the draft the same.
+{note_block}
 You MUST return nothing but a JSON in the following format:
 {sample_revision_notes}
 """,

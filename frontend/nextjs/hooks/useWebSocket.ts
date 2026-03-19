@@ -2,12 +2,24 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { Data, ChatBoxSettings, QuestionData } from '../types/data';
 import { getHost } from '../helpers/getHost';
 
+interface WebSocketCommandOptions {
+  reportId?: string;
+  command?: 'start' | 'rerun';
+  payload?: Record<string, any>;
+}
+
+interface WebSocketHookOptions {
+  onPath?: (output: any) => void;
+  onError?: (error: any) => void;
+}
+
 export const useWebSocket = (
   setOrderedData: React.Dispatch<React.SetStateAction<Data[]>>,
   setAnswer: React.Dispatch<React.SetStateAction<string>>, 
   setLoading: React.Dispatch<React.SetStateAction<boolean>>,
   setShowHumanFeedback: React.Dispatch<React.SetStateAction<boolean>>,
-  setQuestionForHuman: React.Dispatch<React.SetStateAction<string>>
+  setQuestionForHuman: React.Dispatch<React.SetStateAction<string>>,
+  options?: WebSocketHookOptions
 ) => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const heartbeatInterval = useRef<number>();
@@ -44,7 +56,8 @@ export const useWebSocket = (
 
   const initializeWebSocket = useCallback((
     promptValue: string, 
-    chatBoxSettings: ChatBoxSettings
+    chatBoxSettings: ChatBoxSettings,
+    commandOptions: WebSocketCommandOptions = {}
   ) => {
     // Close existing socket if any
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -73,23 +86,28 @@ export const useWebSocket = (
         const domainFilters = JSON.parse(localStorage.getItem('domainFilters') || '[]');
         const domains = domainFilters ? domainFilters.map((domain: any) => domain.value) : [];
         const { report_type, report_source, tone, mcp_enabled, mcp_configs, mcp_strategy } = chatBoxSettings;
+        const command = commandOptions.command || 'start';
         
         // Start a new research
         try {
-          console.log(`Starting new research for: ${promptValue}`);
-          const dataToSend = { 
-            task: promptValue,
-            report_type, 
-            report_source, 
-            tone,
-            query_domains: domains,
-            mcp_enabled: mcp_enabled || false,
-            mcp_strategy: mcp_strategy || "fast",
-            mcp_configs: mcp_configs || []
-          };
-          
-          // Make sure we have a properly formatted command with a space after start
-          const message = `start ${JSON.stringify(dataToSend)}`;
+          let message = '';
+          if (command === 'rerun') {
+            message = `rerun ${JSON.stringify(commandOptions.payload || {})}`;
+          } else {
+            console.log(`Starting new research for: ${promptValue}`);
+            const dataToSend = { 
+              task: promptValue,
+              report_id: commandOptions.reportId,
+              report_type, 
+              report_source, 
+              tone,
+              query_domains: domains,
+              mcp_enabled: mcp_enabled || false,
+              mcp_strategy: mcp_strategy || "fast",
+              mcp_configs: mcp_configs || []
+            };
+            message = `start ${JSON.stringify(dataToSend)}`;
+          }
           console.log(`Sending start message, length: ${message.length}`);
           newSocket.send(message);
         } catch (error) {
@@ -110,9 +128,15 @@ export const useWebSocket = (
           
           if (data.type === 'error') {
             console.error(`Server error: ${data.output}`);
+            setLoading(false);
+            options?.onError?.(data);
           } else if (data.type === 'human_feedback' && data.content === 'request') {
             setQuestionForHuman(data.output);
             setShowHumanFeedback(true);
+          } else if (data.type === 'logs' && data.content === 'error') {
+            console.error(`Server task error: ${data.output}`);
+            setLoading(false);
+            options?.onError?.(data);
           } else {
             const contentAndType = `${data.content}-${data.type}`;
             setOrderedData((prevOrder) => [...prevOrder, { ...data, contentAndType }]);
@@ -125,10 +149,12 @@ export const useWebSocket = (
               setAnswer(data.output);
             } else if (data.type === 'path') {
               setLoading(false);
+              options?.onPath?.(data.output);
             }
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error, event.data);
+          options?.onError?.(error);
         }
       };
 
@@ -145,9 +171,10 @@ export const useWebSocket = (
         if (heartbeatInterval.current) {
           clearInterval(heartbeatInterval.current);
         }
+        options?.onError?.(error);
       };
     }
-  }, [socket, setOrderedData, setAnswer, setLoading, setShowHumanFeedback, setQuestionForHuman]);
+  }, [socket, setOrderedData, setAnswer, setLoading, setShowHumanFeedback, setQuestionForHuman, options]);
 
   return { socket, setSocket, initializeWebSocket };
 };

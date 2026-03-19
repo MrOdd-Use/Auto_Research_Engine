@@ -2,6 +2,8 @@ import os
 import time
 import datetime
 import json
+import copy
+from typing import Any, Awaitable, Callable, Dict, Optional
 from langgraph.graph import StateGraph, END
 # from langgraph.checkpoint.memory import MemorySaver
 from .utils.views import print_agent_output
@@ -17,6 +19,8 @@ from . import \
     HumanAgent, \
     ReviewerAgent, \
     ReviserAgent
+
+from multi_agents.workflow_session import WorkflowSessionRecorder
 
 
 class ChiefEditorAgent:
@@ -188,7 +192,318 @@ class ChiefEditorAgent:
         else:
             print_agent_output(message, "MASTER")
 
-    async def run_research_task(self, task_id=None):
+    async def _run_global_node(
+        self,
+        node_name: str,
+        runner: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]],
+        state: Dict[str, Any],
+        recorder: WorkflowSessionRecorder | None,
+        *,
+        note: str | None = None,
+        rerunnable: bool = True,
+    ) -> Dict[str, Any]:
+        state_before = copy.deepcopy(state)
+        self._inject_global_note(node_name, state, note)
+        output_delta = await runner(state)
+        state.update(output_delta or {})
+        self._clear_ephemeral_global_note(state)
+        if recorder is not None:
+            await recorder.record_global_checkpoint(
+                node_name,
+                state_before=state_before,
+                output_delta=output_delta or {},
+                state_after=state,
+                summary=self._summarize_global_output(node_name, output_delta or {}, state),
+                rerunnable=rerunnable,
+            )
+        return state
+
+    async def _run_browser(self, state: Dict[str, Any], recorder: WorkflowSessionRecorder | None, note: str | None = None) -> Dict[str, Any]:
+        return await self._run_global_node(
+            "browser",
+            self._workflow_agents["research"].run_initial_research,
+            state,
+            recorder,
+            note=note,
+        )
+
+    async def _run_planner_loop(
+        self,
+        state: Dict[str, Any],
+        recorder: WorkflowSessionRecorder | None,
+        *,
+        include_human_feedback: bool,
+        planner_note: str | None = None,
+    ) -> Dict[str, Any]:
+        while True:
+            state = await self._run_global_node(
+                "planner",
+                self._workflow_agents["editor"].plan_research,
+                state,
+                recorder,
+                note=planner_note,
+            )
+            planner_note = None
+            if not include_human_feedback:
+                state["human_feedback"] = None
+                break
+            state = await self._run_global_node(
+                "human",
+                self._workflow_agents["human"].review_plan,
+                state,
+                recorder,
+                rerunnable=False,
+            )
+            if state.get("human_feedback") is None:
+                break
+        return state
+
+    async def _run_researcher(
+        self,
+        state: Dict[str, Any],
+        recorder: WorkflowSessionRecorder | None,
+        *,
+        note: str | None = None,
+        selected_section_key: str | None = None,
+        section_start_node: str | None = None,
+        section_state_before: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        state_before = copy.deepcopy(state)
+        editor = self._workflow_agents["editor"]
+        run_parallel_research = editor.run_parallel_research
+        try:
+            output_delta = await run_parallel_research(
+                state,
+                session_recorder=recorder,
+                selected_section_key=selected_section_key,
+                start_from_section_node=section_start_node,
+                section_state_before=section_state_before,
+                note=note,
+            )
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            output_delta = await run_parallel_research(state)
+        state.update(output_delta or {})
+        if recorder is not None:
+            await recorder.record_global_checkpoint(
+                "researcher",
+                state_before=state_before,
+                output_delta=output_delta or {},
+                state_after=state,
+                summary=self._summarize_global_output("researcher", output_delta or {}, state),
+            )
+        return state
+
+    async def _run_review_cycle(
+        self,
+        state: Dict[str, Any],
+        recorder: WorkflowSessionRecorder | None,
+        *,
+        start_node: str = "reviewer",
+        reviewer_note: str | None = None,
+        reviser_note: str | None = None,
+    ) -> Dict[str, Any]:
+        current_node = start_node
+        pending_reviewer_note = reviewer_note
+        pending_reviser_note = reviser_note
+
+        while True:
+            if current_node == "reviewer":
+                state = await self._run_global_node(
+                    "reviewer",
+                    self._run_final_reviewer,
+                    state,
+                    recorder,
+                    note=pending_reviewer_note,
+                )
+                pending_reviewer_note = None
+                if state.get("review") is None:
+                    break
+                current_node = "reviser"
+                continue
+
+            state = await self._run_global_node(
+                "reviser",
+                self._run_final_reviser,
+                state,
+                recorder,
+                note=pending_reviser_note,
+            )
+            pending_reviser_note = None
+            if self._is_review_cap_reached(state):
+                break
+            current_node = "reviewer"
+
+        return state
+
+    async def _execute_workflow(
+        self,
+        *,
+        initial_state: Dict[str, Any],
+        recorder: WorkflowSessionRecorder | None = None,
+        start_node: str = "browser",
+        include_human_feedback: bool = True,
+        note: str | None = None,
+        selected_section_key: str | None = None,
+        section_start_node: str | None = None,
+        section_state_before: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        state = copy.deepcopy(initial_state)
+
+        if start_node == "browser":
+            state = await self._run_browser(state, recorder, note=note)
+            state = await self._run_planner_loop(
+                state,
+                recorder,
+                include_human_feedback=include_human_feedback,
+            )
+            state = await self._run_researcher(state, recorder)
+            state = await self._run_global_node("writer", self._workflow_agents["writer"].run, state, recorder)
+            state = await self._run_review_cycle(state, recorder)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node in {"planner", "human"}:
+            state = await self._run_planner_loop(
+                state,
+                recorder,
+                include_human_feedback=include_human_feedback,
+                planner_note=note if start_node == "planner" else None,
+            )
+            state = await self._run_researcher(state, recorder)
+            state = await self._run_global_node("writer", self._workflow_agents["writer"].run, state, recorder)
+            state = await self._run_review_cycle(state, recorder)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node == "researcher":
+            state = await self._run_researcher(
+                state,
+                recorder,
+                note=note,
+                selected_section_key=selected_section_key,
+                section_start_node=section_start_node,
+                section_state_before=section_state_before,
+            )
+            state = await self._run_global_node("writer", self._workflow_agents["writer"].run, state, recorder)
+            state = await self._run_review_cycle(state, recorder)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node == "writer":
+            state = await self._run_global_node(
+                "writer",
+                self._workflow_agents["writer"].run,
+                state,
+                recorder,
+                note=note,
+            )
+            state = await self._run_review_cycle(state, recorder)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node == "reviewer":
+            state = await self._run_review_cycle(state, recorder, start_node="reviewer", reviewer_note=note)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node == "reviser":
+            state = await self._run_review_cycle(state, recorder, start_node="reviser", reviser_note=note)
+            state = await self._run_global_node("publisher", self._workflow_agents["publisher"].run, state, recorder)
+            return state
+
+        if start_node == "publisher":
+            state = await self._run_global_node(
+                "publisher",
+                self._workflow_agents["publisher"].run,
+                state,
+                recorder,
+                note=note,
+            )
+            return state
+
+        raise ValueError(f"Unsupported workflow start node: {start_node}")
+
+    def _inject_global_note(self, node_name: str, state: Dict[str, Any], note: str | None) -> None:
+        if not note:
+            return
+        task = state.setdefault("task", {})
+        if node_name == "planner":
+            task["include_human_feedback"] = True
+            state["human_feedback"] = note
+            return
+        if node_name == "researcher":
+            existing = str(state.get("extra_hints") or "").strip()
+            state["extra_hints"] = f"{existing}\n{note}".strip() if existing else note
+            return
+        if node_name == "browser":
+            query = str(task.get("query") or "").strip()
+            task["query"] = f"{query}\nAdditional rerun instruction: {note}".strip()
+            return
+        task["checkpoint_note"] = note
+        task["checkpoint_target"] = node_name
+
+    def _clear_ephemeral_global_note(self, state: Dict[str, Any]) -> None:
+        task = state.get("task")
+        if isinstance(task, dict):
+            task.pop("checkpoint_note", None)
+            task.pop("checkpoint_target", None)
+
+    def _summarize_global_output(
+        self,
+        node_name: str,
+        output_delta: Dict[str, Any],
+        state_after: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if node_name == "planner":
+            return {
+                "sections": list(state_after.get("sections") or []),
+                "section_count": len(state_after.get("section_details") or []),
+            }
+        if node_name == "researcher":
+            return {
+                "research_items": len(output_delta.get("research_data") or []),
+                "scrap_packets": len(output_delta.get("scrap_packets") or []),
+                "check_data_reports": len(output_delta.get("check_data_reports") or []),
+            }
+        if node_name == "writer":
+            return {
+                "sources": len(output_delta.get("sources") or []),
+                "has_introduction": bool(output_delta.get("introduction")),
+                "has_conclusion": bool(output_delta.get("conclusion")),
+            }
+        if node_name == "reviewer":
+            return {
+                "accepted": state_after.get("review") is None,
+                "review_iterations": state_after.get("review_iterations", 0),
+            }
+        if node_name == "reviser":
+            return {
+                "review_iterations": state_after.get("review_iterations", 0),
+                "has_revision_notes": bool(output_delta.get("revision_notes")),
+            }
+        if node_name == "publisher":
+            report = str(output_delta.get("report") or "")
+            return {"report_length": len(report)}
+        if node_name == "browser":
+            report = str(output_delta.get("initial_research") or "")
+            return {"initial_research_length": len(report)}
+        return {"keys": sorted((output_delta or {}).keys())}
+
+    async def run_research_task(
+        self,
+        task_id=None,
+        *,
+        session_recorder: WorkflowSessionRecorder | None = None,
+        start_node: str = "browser",
+        initial_state: Optional[Dict[str, Any]] = None,
+        include_human_feedback: bool = True,
+        note: str | None = None,
+        selected_section_key: str | None = None,
+        section_start_node: str | None = None,
+        section_state_before: Dict[str, Any] | None = None,
+    ):
         """
         Run a research task with the initialized research team.
 
@@ -198,17 +513,30 @@ class ChiefEditorAgent:
         Returns:
             The result of the research task.
         """
-        research_team = self.init_research_team()
-        chain = research_team.compile()
+        agents = self._initialize_agents()
+        self._workflow_agents = agents
 
         await self._log_research_start()
 
-        config = {
-            "configurable": {
-                "thread_id": task_id,
-                "thread_ts": datetime.datetime.utcnow()
-            }
-        }
-
-        result = await chain.ainvoke({"task": self.task}, config=config)
-        return result
+        base_state = initial_state or {"task": copy.deepcopy(self.task)}
+        try:
+            result = await self._execute_workflow(
+                initial_state=base_state,
+                recorder=session_recorder,
+                start_node=start_node,
+                include_human_feedback=include_human_feedback,
+                note=note,
+                selected_section_key=selected_section_key,
+                section_start_node=section_start_node,
+                section_state_before=section_state_before,
+            )
+            if session_recorder is not None:
+                await session_recorder.mark_completed(
+                    final_state=result,
+                    answer=str(result.get("report") or ""),
+                )
+            return result
+        except Exception as exc:
+            if session_recorder is not None:
+                await session_recorder.mark_failed(str(exc))
+            raise

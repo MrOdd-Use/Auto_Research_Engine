@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import WebSocket
 
@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 class WebSocketManager:
     """Manage websockets"""
 
-    def __init__(self):
+    def __init__(self, report_store=None, workflow_store=None):
         """Initialize the WebSocketManager class."""
         self.active_connections: List[WebSocket] = []
         self.sender_tasks: Dict[WebSocket, asyncio.Task] = {}
         self.message_queues: Dict[WebSocket, asyncio.Queue] = {}
+        self.report_store = report_store
+        self.workflow_store = workflow_store
 
     async def start_sender(self, websocket: WebSocket):
         """Start the sender task."""
@@ -91,7 +93,31 @@ class WebSocketManager:
             except:
                 pass  # If this fails too, there's nothing more we can do
 
-    async def start_streaming(self, task, report_type, report_source, source_urls, document_urls, tone, websocket, headers=None, query_domains=[], mcp_enabled=False, mcp_strategy="fast", mcp_configs=[]):
+    async def start_streaming(
+        self,
+        task,
+        report_type,
+        report_source,
+        source_urls,
+        document_urls,
+        tone,
+        websocket,
+        headers=None,
+        query_domains=[],
+        mcp_enabled=False,
+        mcp_strategy="fast",
+        mcp_configs=[],
+        logs_handler=None,
+        session_recorder=None,
+        start_node="browser",
+        initial_state=None,
+        include_human_feedback=True,
+        note=None,
+        selected_section_key=None,
+        section_start_node=None,
+        section_state_before=None,
+        report_id=None,
+    ):
         """Start streaming the output."""
         tone = Tone[tone]
         # add customized JSON config file path here
@@ -101,14 +127,49 @@ class WebSocketManager:
         report = await run_agent(
             task, report_type, report_source, source_urls, document_urls, tone, websocket, 
             headers=headers, query_domains=query_domains, config_path=config_path,
-            mcp_enabled=mcp_enabled, mcp_strategy=mcp_strategy, mcp_configs=mcp_configs
+            mcp_enabled=mcp_enabled, mcp_strategy=mcp_strategy, mcp_configs=mcp_configs,
+            logs_handler=logs_handler,
+            session_recorder=session_recorder,
+            start_node=start_node,
+            initial_state=initial_state,
+            include_human_feedback=include_human_feedback,
+            note=note,
+            selected_section_key=selected_section_key,
+            section_start_node=section_start_node,
+            section_state_before=section_state_before,
+            report_id=report_id,
         )
         return report
 
-async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", mcp_enabled=False, mcp_strategy="fast", mcp_configs=[]):
+async def run_agent(
+    task,
+    report_type,
+    report_source,
+    source_urls,
+    document_urls,
+    tone: Tone,
+    websocket,
+    stream_output=stream_output,
+    headers=None,
+    query_domains=[],
+    config_path="",
+    mcp_enabled=False,
+    mcp_strategy="fast",
+    mcp_configs=[],
+    logs_handler=None,
+    session_recorder=None,
+    start_node="browser",
+    initial_state=None,
+    include_human_feedback=True,
+    note=None,
+    selected_section_key=None,
+    section_start_node=None,
+    section_state_before=None,
+    report_id: Optional[str] = None,
+):
     """Run the agent."""    
     # Create logs handler for this research task
-    logs_handler = CustomLogsHandler(websocket, task)
+    logs_handler = logs_handler or CustomLogsHandler(websocket, task, report_id=report_id)
 
     # Set up MCP configuration if enabled
     if mcp_enabled and mcp_configs:
@@ -137,7 +198,13 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
         stream_output=stream_output,
         tone=tone,
         headers=headers,
+        session_recorder=session_recorder,
+        start_node=start_node,
+        initial_state=initial_state,
+        include_human_feedback=include_human_feedback,
+        note=note,
+        selected_section_key=selected_section_key,
+        section_start_node=section_start_node,
+        section_state_before=section_state_before,
     )
-    if isinstance(report, dict):
-        return str(report.get("report", ""))
-    return str(report)
+    return report

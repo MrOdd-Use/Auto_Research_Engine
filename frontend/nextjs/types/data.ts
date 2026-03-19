@@ -68,4 +68,62 @@ export interface ResearchHistoryItem {
   timestamp: number;
   orderedData: Data[];
   chatMessages?: ChatMessage[];
+  status?: 'running' | 'completed' | 'failed';
+  workflow_available?: boolean;
+  current_session_id?: string;
+  last_successful_session_id?: string;
 } 
+
+export interface WorkflowCheckpointNode {
+  checkpoint_id: string;
+  node_name: string;
+  display_name?: string;
+  status: string;
+  step_order: number;
+  rerunnable: boolean;
+  summary?: any;
+  scope: string;
+  section_key?: string;
+}
+
+export interface WorkflowSectionTree {
+  section_key: string;
+  section_index: number;
+  section_title: string;
+  scope: string;
+  checkpoints: WorkflowCheckpointNode[];
+}
+
+export interface WorkflowCheckpointTree {
+  global_nodes: WorkflowCheckpointNode[];
+  sections: WorkflowSectionTree[];
+}
+
+export interface WorkflowSessionSummary {
+  session_id: string;
+  parent_session_id?: string | null;
+  root_session_id?: string | null;
+  rerun_from_checkpoint_id?: string | null;
+  round_index: number;
+  status: 'running' | 'completed' | 'failed';
+  created_at: string;
+  updated_at?: string;
+  note?: string | null;
+  target?: any;
+}
+
+export interface WorkflowSelectedSession extends WorkflowSessionSummary {
+  answer: string;
+  ordered_data: Data[];
+  checkpoints_tree: WorkflowCheckpointTree;
+}
+
+export interface WorkflowResponse {
+  report_id: string;
+  workflow_available: boolean;
+  legacy_reason?: string | null;
+  current_session_id?: string | null;
+  last_successful_session_id?: string | null;
+  sessions: WorkflowSessionSummary[];
+  selected_session?: WorkflowSelectedSession | null;
+}

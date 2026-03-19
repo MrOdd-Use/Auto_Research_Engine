@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from backend.chat.chat import ChatAgentWithMemory
 from backend.server.report_store import ReportStore
+from backend.server.workflow_store import WorkflowStore
 from backend.server.server_utils import (
     execute_multi_agents,
     handle_file_deletion,
@@ -105,8 +106,9 @@ if os.path.isdir(frontend_dir):
 else:
     logger.warning("Frontend directory not found: %s", frontend_dir)
 
-manager = WebSocketManager()
 report_store = ReportStore(Path(os.getenv('REPORT_STORE_PATH', os.path.join('data', 'reports.json'))))
+workflow_store = WorkflowStore(Path(os.getenv('WORKFLOW_STORE_PATH', os.path.join('data', 'workflows'))))
+manager = WebSocketManager(report_store=report_store, workflow_store=workflow_store)
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
 
 @app.get("/", response_class=HTMLResponse)
@@ -145,6 +147,12 @@ async def get_report_by_id(research_id: str):
     return {"report": report}
 
 
+@app.get("/api/reports/{research_id}/workflow")
+async def get_report_workflow(research_id: str, session_id: str | None = None):
+    workflow = await workflow_store.build_workflow_response(research_id, session_id=session_id)
+    return workflow
+
+
 @app.post("/api/reports")
 async def create_or_update_report(request: Request):
     try:
@@ -159,11 +167,13 @@ async def create_or_update_report(request: Request):
             timestamp = max(timestamp, existing["timestamp"])
 
         report = {
+            **(existing or {}),
+            **{k: v for k, v in data.items() if k != "id" and v is not None},
             "id": research_id,
-            "question": data.get("question"),
-            "answer": data.get("answer"),
-            "orderedData": data.get("orderedData") or [],
-            "chatMessages": data.get("chatMessages") or [],
+            "question": data.get("question", (existing or {}).get("question")),
+            "answer": data.get("answer", (existing or {}).get("answer", "")),
+            "orderedData": data.get("orderedData", (existing or {}).get("orderedData") or []),
+            "chatMessages": data.get("chatMessages", (existing or {}).get("chatMessages") or []),
             "timestamp": timestamp,
         }
 
@@ -235,7 +245,7 @@ async def add_report_chat_message(research_id: str, request: Request):
 
 
 async def write_report(research_request: ResearchRequest, research_id: str = None):
-    report = await run_agent(
+    report_result = await run_agent(
         task=research_request.task,
         report_type=research_request.report_type,
         report_source=research_request.report_source,
@@ -248,7 +258,11 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         query_domains=[],
         config_path="",
     )
-    report = str(report)
+    report = (
+        str(report_result.get("report", ""))
+        if isinstance(report_result, dict)
+        else str(report_result)
+    )
 
     docx_path = await write_md_to_word(report, research_id)
     pdf_path = await write_md_to_pdf(report, research_id)

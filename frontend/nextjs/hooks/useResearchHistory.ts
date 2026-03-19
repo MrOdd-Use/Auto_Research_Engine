@@ -154,10 +154,14 @@ export const useResearchHistory = () => {
   }, []); // Empty dependency array - only run once on mount
   
   // Save new research
-  const saveResearch = async (question: string, answer: string, orderedData: Data[]) => {
+  const saveResearch = async (
+    question: string,
+    answer: string,
+    orderedData: Data[],
+    id?: string,
+  ) => {
     try {
-      // Generate a unique ID
-      const id = uuidv4();
+      const researchId = id || uuidv4();
       
       // Save to backend
       const response = await fetch('/api/reports', {
@@ -166,7 +170,7 @@ export const useResearchHistory = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id,
+          id: researchId,
           question,
           answer,
           orderedData,
@@ -208,7 +212,7 @@ export const useResearchHistory = () => {
       
       // Fallback: save to localStorage only
       const newResearch = {
-        id: uuidv4(),
+        id: researchId,
         question,
         answer,
         orderedData,
