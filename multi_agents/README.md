@@ -10,6 +10,16 @@ An average run generates a 5-6 page research report in multiple formats such as 
 
 Please note: Multi-agents are utilizing the same configuration of models like Auto_Research_Engine does. However, only the SMART_LLM is used for the time being. Please refer to the [LLM config pages](https://docs.gptr.dev/docs/Auto_Research_Engine/llms).
 
+## Node Rerun / Rerun from Checkpoint
+
+The `multi_agents` workflow now supports `节点回溯` (`Rerun from Checkpoint`).
+
+- Every full run creates a workflow session tied to a stable `report_id`
+- Global nodes such as `browser`, `planner`, `researcher`, `writer`, `reviewer`, `reviser`, and `publisher` are stored as rerunnable checkpoints
+- Section-level checkpoints are also stored for the researcher stage so a single section can be rerun without recomputing the whole report
+- Each rerun creates a new child session, preserving round history and the last successful version of the report
+- The frontend exposes these sessions and checkpoints in the report page through the `Rerun from Checkpoint` panel
+
 ## The Multi Agent Team
 The research team is made up of 8 agents:
 - **Human** - The human in the loop that oversees the process and provides feedback to the agents.
@@ -46,6 +56,17 @@ More specifically (as seen in the architecture diagram) the process is as follow
 - Writer - Compiles and writes the final report including an introduction, conclusion and references section from the given research findings.
 - Publisher - Publishes the final report to multi formats such as PDF, Docx, Markdown, etc.
 
+### Session persistence
+
+Workflow-session data is stored under:
+
+```text
+data/workflows/{report_id}/
+```
+
+- `index.json` tracks `current_session_id`, `last_successful_session_id`, and session summaries
+- `session_{session_id}.json` stores the full workflow state, checkpoint list, note, rerun target, and output snapshot for that round
+
 ## How to run
 1. Install required packages found in this root folder including `langgraph`:
     ```bash
@@ -70,6 +91,14 @@ To change the research query and customize the report, edit the `task.json` file
 - `follow_guidelines` - If true, the research report will follow the guidelines below. It will take longer to complete. If false, the report will be generated faster but may not follow the guidelines.
 - `guidelines` - A list of guidelines that the report must follow.
 - `verbose` - If true, the application will print detailed logs to the console.
+
+### WebSocket workflow controls
+
+When running through the backend/frontend integration:
+
+- `start` accepts `report_id` so the first run and later reruns stay attached to the same report
+- `rerun` accepts `report_id`, `checkpoint_id`, and optional `note` to trigger `Rerun from Checkpoint`
+- `GET /api/reports/{id}/workflow` returns the session list and checkpoint tree for the report page UI
 
 #### For example:
 ```json

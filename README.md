@@ -9,6 +9,7 @@ The core idea is not to let a single model generate a long answer in one shot. I
 - Supports both web research and local document research
 - Multi-agent state-machine workflow built on LangGraph
 - Section-level parallel deep research and result aggregation
+- Node rerun support (`节点回溯` / `Rerun from Checkpoint`) for the `multi_agents` workflow
 - Multi-format export to Markdown, PDF, and DOCX
 - FastAPI API, WebSocket streaming, CLI, Python SDK, and frontend interfaces
 - Optional MCP integration with pluggable retrievers, scrapers, and model providers
@@ -32,6 +33,16 @@ The core idea is not to let a single model generate a long answer in one shot. I
 6. The Writer aggregates section outputs and generates the introduction, table of contents, body, conclusion, and references.
 7. Reviewer and Reviser agents refine the final draft until it is publishable or reaches the review cap.
 8. The backend exports Markdown, PDF, and DOCX, then exposes the result through report storage, chat endpoints, and frontend interfaces.
+
+## Node Rerun
+
+The `multi_agents` workflow now supports `节点回溯` (`Rerun from Checkpoint`) so users can selectively rerun part of a completed report instead of starting over.
+
+- Each initial run or rerun creates a new workflow session under `data/workflows/{report_id}/`
+- Global workflow nodes such as `browser`, `planner`, `researcher`, `writer`, `reviewer`, `reviser`, and `publisher` are recorded as rerunnable checkpoints
+- Section-level checkpoints are also recorded inside the researcher stage, including `scrap` and `check_data` when ASA is enabled
+- A rerun can restart from a global node or a single section node and will only recompute the required downstream path
+- Multiple rounds of changes are preserved as parent/child sessions so a report keeps its full revision history
 
 ## Module Breakdown
 
@@ -97,6 +108,7 @@ This layer is not mainly about making the model "smarter". It is about making co
 | `backend/server/websocket_manager.py` | Streaming session manager | Manages active connections, message queues, and live task output for real-time frontend updates. |
 | `backend/server/server_utils.py` | Service helpers | Handles command parsing, uploads, file deletion, log persistence, file export, and human-feedback queuing. |
 | `backend/server/report_store.py` | Report persistence | Uses a lightweight JSON-backed store with atomic temp-file replacement for report data. |
+| `backend/server/workflow_store.py` | Workflow-session persistence | Stores checkpoint trees, session lineage, selected rerun targets, and last successful workflow state for `Rerun from Checkpoint`. |
 | `backend/chat/chat.py` | Report chat agent | Lets users keep asking questions about an existing report and optionally trigger `quick_search` when fresh information is needed. |
 | `backend/utils.py` | Export utilities | Converts Markdown output into `.md`, `.pdf`, and `.docx`. |
 | `backend/memory/` | Runtime state data | Stores intermediate research and draft-related runtime data for backend flows. |
@@ -108,9 +120,9 @@ This layer is not mainly about making the model "smarter". It is about making co
 | Module | Role | Notes |
 | --- | --- | --- |
 | `frontend/index.html` + `scripts.js` + `styles.css` | Static frontend | Can be served directly by the backend and is useful for quick demos and local exploration. |
-| `frontend/nextjs/` | Next.js app and UI package | Provides a richer research interface, report views, research history, mobile layouts, settings panels, and embeddable React components. |
+| `frontend/nextjs/` | Next.js app and UI package | Provides a richer research interface, report views, research history, `节点回溯` (`Rerun from Checkpoint`) controls, mobile layouts, settings panels, and embeddable React components. |
 | `frontend/nextjs/hooks/` | Frontend data layer | Contains WebSocket handling, research history, scroll behavior, and analytics helpers. |
-| `frontend/nextjs/components/` | Interaction components | Includes research forms, log panels, chat panels, report blocks, image displays, and settings components. |
+| `frontend/nextjs/components/` | Interaction components | Includes research forms, log panels, chat panels, report blocks, image displays, settings components, and the workflow-session panel used for `Rerun from Checkpoint`. |
 
 ### 5. Supporting Engineering Modules
 
@@ -257,6 +269,14 @@ asyncio.run(run())
 3. Use the local or hybrid source mode in your workflow/configuration
 
 Supported formats include PDF, TXT, CSV, Excel, Markdown, PowerPoint, and Word documents.
+
+### Workflow APIs
+
+For the Next.js frontend and custom integrations, the workflow layer exposes:
+
+- `GET /api/reports/{id}/workflow` to fetch sessions and the checkpoint tree for a report
+- WebSocket `start` with `report_id` to create a stable workflow-linked report
+- WebSocket `rerun` with `report_id`, `checkpoint_id`, and optional `note` to trigger `Rerun from Checkpoint`
 
 ## Project Structure
 

@@ -16,8 +16,18 @@ It comes with loads of added features, such as:
  - a drag-n-drop user interface for uploading and deleting files to be used as local documents by GPTResearcher.
  - a GUI for setting your GPTR environment variables.
  - the ability to trigger the multi_agents flow via the Backend Module or Langgraph Cloud Host (currently in closed beta).
+ - `节点回溯` (`Rerun from Checkpoint`) for completed `multi_agents` reports.
  - stability fixes
  - and more coming soon!
+
+## Node Rerun
+
+The report page in the Next.js frontend now exposes `节点回溯` (`Rerun from Checkpoint`) for `multi_agents` reports.
+
+- Each report uses a stable `report_id` so the initial run and later reruns stay linked
+- The UI loads workflow sessions and checkpoint trees from `GET /api/reports/{id}/workflow`
+- Users can review previous rounds, inspect section checkpoints, and launch `Rerun from Checkpoint`
+- A rerun can target a global node or a single section node, depending on the stored workflow state
 
 ### Run the NextJS React App with Docker
 

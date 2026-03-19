@@ -81,5 +81,15 @@ Our frontend enhances Auto_Research_Engine by providing:
 3. Interactive Results Display: Easy-to-navigate presentation of findings.
 4. Customizable Settings: Adjust research parameters to suit specific needs.
 5. Responsive Design: Optimal experience across various devices.
+6. `节点回溯` (`Rerun from Checkpoint`): completed `multi_agents` reports can be reopened, inspected by workflow session, and rerun from a selected checkpoint instead of restarting the whole workflow.
 
 These features aim to make the research process more efficient and user-friendly, complementing Auto_Research_Engine's powerful agent capabilities.
+
+## Node Rerun
+
+The Next.js report page now supports `节点回溯` (`Rerun from Checkpoint`) for the `multi_agents` workflow.
+
+- Each report is created with a stable `report_id`
+- Workflow session history is loaded from `GET /api/reports/{id}/workflow`
+- Users can inspect global and section-level checkpoints
+- `Rerun from Checkpoint` can rerun a single node or section and keep earlier successful rounds intact
