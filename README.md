@@ -1,6 +1,4 @@
 <div align="center">
-  <img src="https://github.com/MrOdd-Use/Auto_Research_Engine/assets/13554167/20af8286-b386-44a5-9a83-3be1365139c3" alt="Auto_Research_Engine logo" width="80">
-
   <h1>Auto_Research_Engine</h1>
 
   <p>
