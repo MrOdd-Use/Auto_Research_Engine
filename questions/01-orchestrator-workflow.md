@@ -60,7 +60,7 @@
 - multi_agents/agents/orchestrator.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：角色被拆成独立节点与提示（Writer/Editor/Research/Human/Reviewer/Reviser/Publisher），并行研究在编辑/规划模块里按“章节”并发执行并聚合结果（见 `multi_agents/agents/editor.py`）。
+- 实现：角色被拆成独立节点与提示（Writer/Editor/Research/Human/ClaimVerifier/Reviewer/Reviser/Publisher），并行研究在编辑/规划模块里按“章节”并发执行并聚合结果（见 `multi_agents/agents/editor.py`）。
 - 为什么：把规划、证据采集、写作、审阅的目标函数分离，避免一个超长 prompt 同时优化多目标导致不稳定。
 - 利弊：利是质量门禁更清晰、并行加速；弊是协调成本（重复/冲突/预算）上升，需要更强的去重、共享缓存与一致性校验。
 
@@ -71,7 +71,7 @@
 答题要点：每个 agent 关注不同目标（覆盖/事实性/结构/可发布性），并通过 state 传递产物。
 
 **实现：** 你们有哪些角色？各自负责什么？  
-答题要点：Human/Chief Editor/Researcher/Editor/Writer/Reviewer/Reviser/Publisher（见 `multi_agents/README.md`）。
+答题要点：Human/Chief Editor/Researcher/Editor/Writer/ClaimVerifier/Reviewer/Reviser/Publisher（见 `multi_agents/README.md`）。
 
 **边界：** 多智能体最容易失败在哪里？  
 答题要点：重复劳动、互相矛盾、上下文爆炸、路由不稳定、评测不闭环。
@@ -127,9 +127,9 @@
 ### Q04（基础）：你项目的端到端链路是什么？每段输入/输出是什么？
 
 **标准答案（可直接说）：**
-一句话：链路是“初始资料收集 → 结构化大纲 → HITL 审阅回流 → 分章节并行深研 → 汇编写作 → 审阅/修订循环 → 多格式发布”，通过 `ResearchState` 传递与聚合结果。
+一句话：链路是“初始资料收集 → 结构化大纲 → HITL 审阅回流 → 分章节并行深研 → 汇编写作 → ClaimVerifier/Reflexion → 审阅/修订循环 → 多格式发布”，通过 `ResearchState` 传递与聚合结果。
 
-展开：初始资料收集产生初步研究文本；规划阶段把初始研究转换为结构化大纲（章节、描述、关键点、章节研究查询）；HITL 节点可修改大纲并触发回流；随后按章节并行做深研，产出每章草稿与证据包；写作阶段生成引言/目录/结论/引用与统一 headers；终稿经过审阅/修订循环后进入发布，导出 markdown/pdf/docx 等。
+展开：初始资料收集产生初步研究文本；规划阶段把初始研究转换为结构化大纲（章节、描述、关键点、章节研究查询）；HITL 节点可修改大纲并触发回流；随后按章节并行做深研，产出每章草稿与证据包；写作阶段基于 append-only `source_index` 生成引言/目录/结论/引用与 `claim_annotations`；ClaimVerifier 对断言做四级置信度分级并在必要时触发按章节的 Reflexion 补检索；终稿再经过审阅/修订循环后进入发布，导出 markdown/pdf/docx 等。
 
 常见坑/反杀点：
 - 不要把“写作”说成只拼接：Writer 会生成引言/结论/目录与来源列表。
@@ -140,7 +140,7 @@
 - multi_agents/memory/research.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：链路节点在 `multi_agents/agents/orchestrator.py` 明确：初始研究写入 `initial_research`；规划写入 `section_details`；并行深研聚合 `research_data/scrap_packets/check_data_reports`；写作生成 `introduction/conclusion/table_of_contents/sources`；审阅/修订产出 `final_draft`；发布落到 `report` 与多格式文件（见 `multi_agents/agents/publisher.py`）。
+- 实现：链路节点在 `multi_agents/agents/orchestrator.py` 明确：初始研究写入 `initial_research`；规划写入 `section_details`；并行深研聚合 `research_data/scrap_packets/check_data_reports`；写作生成 `introduction/conclusion/table_of_contents/sources/claim_annotations`；ClaimVerifier 生成 `source_index/indexed_research_data/claim_confidence_report` 并在 `SUSPICIOUS` 场景下触发章节级 rerun；审阅/修订产出 `final_draft`；发布落到 `report` 与多格式文件（见 `multi_agents/agents/publisher.py`）。
 - 为什么：把“方向对齐（大纲）”放在前面，把“内容打磨（Reviewer–Reviser）”放在后面，避免在错误方向上堆成本。
 - 利弊：利是每段输入输出可解释、可复用；弊是步骤变多，端到端时延更长，且每段的失败需要降级/兜底策略。
 
@@ -149,11 +149,11 @@
 > 本题映射：用示例把端到端产物串起来：追问收敛→结构化大纲（`section_details`）→按章证据包→终稿内容→发布（markdown/pdf/docx 等）。
 
 **定义：** 最关键的质量门禁点是什么？  
-答题要点：HITL 防方向偏离；Check Data 防证据不足；Reviewer–Reviser 防终稿不可发布。
+答题要点：HITL 防方向偏离；Check Data 防章节证据不足；ClaimVerifier 防引用缺失与冲突断言；Reviewer–Reviser 防终稿不可发布。
 
 **实现：** state 在链路里如何演进？  
 答题要点：LangGraph 节点通常只返回“增量 dict”，运行时按 key 合并进 state；因此 state 是“逐步累积 + 覆盖更新”的。
-- 全局用 `ResearchState`（见 `multi_agents/memory/research.py`）：入口只有 `task`，随后依次写入 `initial_research` → `sections/section_details/title/date` → `human_feedback`（有反馈回流） → `research_data/scrap_packets/check_data_reports`（并行聚合） → `introduction/conclusion/table_of_contents/sources/headers` → `review/final_draft/review_iterations` → `report`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/publisher.py`）。
+- 全局用 `ResearchState`（见 `multi_agents/memory/research.py`）：入口只有 `task`，随后依次写入 `initial_research` → `sections/section_details/title/date` → `human_feedback`（有反馈回流） → `research_data/scrap_packets/check_data_reports`（并行聚合） → `source_index/indexed_research_data/introduction/conclusion/table_of_contents/sources/claim_annotations/headers` → `claim_confidence_report/claim_reflexion_iterations` → `review/final_draft/review_iterations` → `report`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/publisher.py`）。
 - 章节级用 `DraftState`（见 `multi_agents/memory/draft.py`）：每章携带 `research_context/extra_hints/audit_feedback/iteration_index`；研究节点产出 `draft/scrap_packet`，Check Data 写入 `check_data_action/check_data_verdict` 并在 `retry` 时更新 `iteration_index/extra_hints`，驱动下一轮补证据；`accept` 时不覆盖 `draft`，保留上一轮产物（见 `multi_agents/agents/editor.py`、`multi_agents/agents/check_data.py`）。
 - 条件路由只看少数“信号字段”：全局主要是 `human_feedback`、`review`、`review_iterations`；章节主要是 `check_data_action`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/editor.py`）。
 
@@ -249,30 +249,31 @@
 
 ---
 
-### Q14（基础）：Reviewer–Reviser 在修什么？它与 Check Data 的分工边界是什么？
+### Q14（基础）：ClaimVerifier、Reviewer–Reviser 与 Check Data 的分工边界是什么？
 
 **标准答案（可直接说）：**
-一句话：Reviewer–Reviser 是终稿的质量控制循环，面向结构、逻辑、一致性与 guidelines；Check Data 是研究阶段证据门禁，面向证据足够性与口径正确性。
+一句话：Check Data 管章节级证据门禁，ClaimVerifier 管 Writer 产出的断言级引用与冲突校验，Reviewer–Reviser 管终稿的可发布性并对全稿或修订 diff 做 source-aware 审查。
 
-展开：Writer 生成引言/结论/目录/来源并形成布局后，Reviewer 根据 guidelines 质检，若满足则输出空反馈表示接受，否则给出修订意见；Reviser 按意见修订并回到 Reviewer 再审。该循环可设置最大轮次上限以平衡质量与时延（上限策略可写进面试口径）。
+展开：章节研究先经过 Check Data，避免证据明显不足时继续写作。Writer 随后基于 `source_index` 生成引言/结论并输出 `claim_annotations`，ClaimVerifier 解析 `[S*]` 引用、做跨域佐证与冲突检测，并对 `SUSPICIOUS` 声明按章节触发 Reflexion 补检索。进入终稿阶段后，Reviewer 除了检查结构、逻辑、一致性与 guidelines，还会在有 `source_index` 时对全稿或 Reviser 改动做 source-aware 审查；Reviser 按意见修订并回到 Reviewer 再审。该循环可设置最大轮次上限以平衡质量与时延。
 
 常见坑/反杀点：
-- 不要把 Reviewer–Reviser 说成事实校验器；它更偏“可发布性”。
+- 不要把 Check Data、ClaimVerifier、Reviewer 混成一个“大校验器”；它们分别管章节证据、断言级引用/冲突、终稿可发布性与修订幻觉。
 - 要能解释为什么不对每章都做 Reviewer（成本与价值）。
 
 **相关模块（对应实现）：**
+- multi_agents/agents/claim_verifier.py
 - multi_agents/agents/reviewer.py
 - multi_agents/agents/reviser.py
 - multi_agents/agents/orchestrator.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：终稿阶段由 Reviewer 输出 `review`（为空表示接受），Orchestrator 依据 `review` 路由到发布或修订；修订次数写入 `review_iterations`，达到 `max_review_rounds`（默认 3，可配置）后直接发布当前最优稿（见 `multi_agents/agents/orchestrator.py`、`multi_agents/memory/research.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。
-- 为什么：Reviewer–Reviser 面向“可发布性”（结构/一致性/指南），与研究阶段的证据门禁分工，避免把所有校验都堆在一个节点。
-- 利弊：利是产物质量更稳定；弊是如果前置证据不足，后置润色可能“更像真的”，因此必须强调先 gate 后写作/审阅的顺序。
+- 实现：Writer 之后先由 ClaimVerifier 生成 `claim_confidence_report`，必要时按 `section_key` 触发章节级 rerun；终稿阶段由 Reviewer 输出 `review`（为空表示接受），Orchestrator 依据 `review` 路由到发布或修订；修订次数写入 `review_iterations`，达到 `max_review_rounds`（默认 3，可配置）后直接发布当前最优稿（见 `multi_agents/agents/orchestrator.py`、`multi_agents/memory/research.py`、`multi_agents/agents/claim_verifier.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。
+- 为什么：先把“证据够不够、引用对不对”前置成硬门禁，再用 Reviewer–Reviser 处理终稿一致性与可发布性，职责更清楚也更省成本。
+- 利弊：利是事实性与可发布性分层控制更清晰；弊是链路更长、状态更多，需要 `source_index/claim_confidence_report/_draft_before_revision` 这类字段保持契约一致。
 
 **追问链（定义 → 实现 → 边界 → 取舍 → 优化）：**
 > **举例提示（面试官听不懂就用）：** 把本题映射到“AI 对就业市场的影响”示例卡片来讲——先追问口径 → 产出结构化大纲（`section_details`）→ 按章生成 `research_queries` → 证据采集与门禁 → 写作/审阅/发布。这样抽象概念会变成“我在这个例子里具体做了什么”。
-> 本题映射：示例里 Reviewer 主要看结构、逻辑、一致性与指南满足；不把它说成事实校验器，事实风险更多靠“证据门禁 + 引用约束”。
+> 本题映射：示例里 Check Data 先管章节证据，ClaimVerifier 管 Writer 的断言和引用，Reviewer 再看结构、逻辑、一致性、指南满足以及 Reviser 是否引入无源断言。
 
 **定义：** 可发布性包含哪些维度？  
 答题要点：结构完整、逻辑连贯、规范一致、引用格式合理、满足 guidelines。
@@ -513,7 +514,7 @@
 - evals/README.md
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现（现状）：当前架构以“规划（MECE）+ ASA 证据采集 + Check Data gate + 终稿 Reviewer–Reviser + Publisher 多格式”作为主干（见 `multi_agents/agents/*`）。
+- 实现（现状）：当前架构以“规划（MECE）+ ASA 证据采集 + Check Data gate + Writer 引用约束 + ClaimVerifier/Reflexion + 终稿 Reviewer–Reviser + Publisher 多格式”作为主干（见 `multi_agents/agents/*`）。
 - 为什么：相比 Tree-of-Thought/全局向量库/每步强制引用渲染等更复杂方案，这条链路更容易在线落地：控制面清晰、成本可控、失败可回流。
 - 利弊：利是工程复杂度较低且可迭代；弊是深推理与断言级可验证性仍受限，需要在关键断言上逐步引入更强对齐/更强检索策略（可选升级）。
 
@@ -557,7 +558,7 @@
 - Airflow 更偏离线 DAG/批处理；要做 HITL、条件路由与回流（loop）通常得叠加额外的状态存储与交互层。本仓库的关键价值点是把 `human_feedback`（HITL）与 `review/review_iterations`（review-revise loop）变成显式路由。
 - Celery 能做任务分发/并发，但不提供“状态机语义”；你仍需要自建状态存储、条件路由、回流上限、幂等与可观测，最终会重造一套“调度+状态机”。
 - 自研调度器同样会重造“状态、路由、回流、可观测”的轮子，维护成本高且难做成可回归的契约。
-- 状态持久化（现状澄清）：`multi_agents/agents/orchestrator.py` 未启用 LangGraph checkpointer（`MemorySaver` 被注释）；当前可落地的持久化主要是 `outputs/` 产物与 `multi_agents/agent_state.json`（tiers），不应宣称“可断点续跑”。可选升级：引入 `langgraph-checkpoint` 持久化 checkpoint 以支持断点恢复/回放。
+- 状态持久化（现状澄清）：当前不是依赖 LangGraph 内置 checkpointer，而是通过 `multi_agents/workflow_session.py` + `backend/server/workflow_store.py` 持久化 workflow sessions、global checkpoints、section checkpoints 和 parent/child rerun 关系；前端与 WebSocket 已支持 `Rerun from Checkpoint`，并保留 `last_successful_session_id` 作为稳定版本引用。
 
 **如何验证：**
 - `tests/test_orchestrator_flow.py` 覆盖“审阅直接接受”与“修订后接受”的主流程分支。
@@ -628,22 +629,24 @@
 **如何验证：**
 - `tests/test_editor_planner.py` 的并行 research 聚合用例能验证 `scrap_packets/check_data_reports` 的聚合契约。
 
-### 11) Reviewer–Reviser 为什么不做事实校验？“上限 3 轮”如何实现与计数？
-**一句话结论：** Reviewer 只做“可发布性”质检；事实风险用研究阶段 gate 控制；终稿修订用 `review_iterations/max_review_rounds` 做硬上限。
+### 11) Reviewer–Reviser、ClaimVerifier、Check Data 怎么分工？“上限 3 轮”如何实现与计数？
+**一句话结论：** Check Data 管章节证据门禁，ClaimVerifier 管 Writer 断言级引用与冲突校验，Reviewer–Reviser 管终稿可发布性与 source-aware 修订审查；终稿修订用 `review_iterations/max_review_rounds` 做硬上限。
 
 **实现落点：**
-- `multi_agents/agents/reviewer.py`：在 `follow_guidelines=true` 时输出 review 反馈；返回 `None` 表示接受（实现里是检测 response 是否包含 “None”）。
+- `multi_agents/agents/check_data.py`：对章节证据做 `ACCEPT/RETRY/BLOCKED` 判定，并把缺口回写到 `audit_feedback/extra_hints`。
+- `multi_agents/agents/claim_verifier.py`：构建 append-only `source_index`，解析 `claim_annotations` 与 inline `[S*]`，生成 `claim_confidence_report`，并把 `SUSPICIOUS` claim 按真实 `section_key` 分组用于 Reflexion。
+- `multi_agents/agents/reviewer.py`：在 `follow_guidelines=true` 时做 guidelines review；有 `source_index` 时还会对全稿或 reviser diff 做 source-aware audit。返回空响应、`None.`、`null` 或空结构时表示接受。
 - `multi_agents/agents/orchestrator.py`：`review` 为空则发布，否则进入修订；每次修订 `review_iterations += 1`，达到 `max_review_rounds`（默认 3）后直接发布当前最优稿。
-- `tests/test_orchestrator_flow.py`：覆盖“修订后接受”；并有“达到 max_review_rounds 后强制发布”的回归用例。
+- `tests/test_orchestrator_flow.py`、`tests/test_orchestrator_claim_review.py`：分别覆盖终稿审阅循环和 claim reflexion rerun 行为。
 
 **为什么这样设计：**
-- 事实校验如果放在 Reviewer，会把“证据不足”掩盖成“文风优化问题”；先 gate 再审阅能把成本花在刀刃上。
+- 把“章节证据不足”“Writer 引用或断言冲突”“终稿结构与修订质量”拆开处理，能避免把根因都挤到最后一个 Reviewer 节点。
 
 **追问补充：怎么避免自嗨式循环修改？为什么最多 3 轮？**
 - 现状机制是“软约束 + 硬上限”：
-  - Reviewer prompt 倾向“only if critical… aim return None”，减少无意义的细碎迭代；接受条件是 `review is None`。
+  - Reviewer prompt 倾向“only if critical… aim return None”，减少无意义的细碎迭代；接受条件是 `review` 为空或等价空响应。
   - 修订循环硬上限由 `review_iterations/max_review_rounds` 控制（默认 3），达到上限后强制发布当前最优稿，避免无限循环。
-- 边界（实现细节）：当前 Reviewer 的“接受”是通过检测返回文本是否包含 `None` 来判定，存在误判空间（例如模型输出里出现 “None” 但仍带其他意见）。如需更严格，应改为结构化输出（可选升级，未实现）。
+- 边界（实现细节）：当前 Reviewer 已对 `"None."`、`null`、空列表/空字典做鲁棒接受判定，但本质上仍是自然语言协议；如需更严格，应改为结构化输出（可选升级）。
 
 **追问补充：质量 vs 成本曲线怎么量化？**
 - 现状：仓库未内建在线 A/B，也没有把“每轮改进幅度”量化进路由。

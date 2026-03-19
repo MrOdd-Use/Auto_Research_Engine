@@ -19,24 +19,26 @@ The `multi_agents` workflow now supports `节点回溯` (`Rerun from Checkpoint`
 - Section-level checkpoints are also stored for the researcher stage so a single section can be rerun without recomputing the whole report
 - Each rerun creates a new child session, preserving round history and the last successful version of the report
 - The frontend exposes these sessions and checkpoints in the report page through the `Rerun from Checkpoint` panel
+- The same checkpoint/session layer is reused by targeted claim-reflexion reruns when suspicious sections need new evidence
 
 ## The Multi Agent Team
-The research team is made up of 8 agents:
+The research team is made up of 9 agents:
 - **Human** - The human in the loop that oversees the process and provides feedback to the agents.
 - **Chief Editor** - Oversees the research process and manages the team. This is the "master" agent that coordinates the other agents using Langgraph.
 - **Researcher** (Auto_Research_Engine) - A specialized autonomous agent that conducts in depth research on a given topic.
 - **Editor** - Responsible for planning the research outline and structure.
-- **Reviewer** - Validates the correctness of the research results given a set of criteria.
-- **Revisor** - Revises the research results based on the feedback from the reviewer.
-- **Writer** - Responsible for compiling and writing the final report.
+- **Writer** - Responsible for compiling the final introduction, conclusion, references, and claim annotations from validated section outputs.
+- **ClaimVerifier** - Builds an append-only `source_index`, verifies Writer citations, assigns claim confidence levels, and prepares reflexion reruns for suspicious sections.
+- **Reviewer** - Reviews the final draft for publishability, guideline compliance, and source-aware factual support.
+- **Reviser** - Revises the final draft based on reviewer feedback while preserving structure unless asked otherwise.
 - **Publisher** - Responsible for publishing the final report in various formats.
 
 ## How it works
 Generally, the process is based on the following stages: 
 1. Planning stage
 2. Data collection and analysis
-3. Review and revision
-4. Writing and submission
+3. Writing and claim verification
+4. Review and revision
 5. Publication
 
 ### Architecture
@@ -51,9 +53,11 @@ More specifically (as seen in the architecture diagram) the process is as follow
 - Editor - Plans the report outline and structure based on the initial research.
 - For each outline topic (in parallel):
   - Researcher (Auto_Research_Engine) - Runs an in depth research on the subtopics and writes a draft.
-  - Reviewer - Validates the correctness of the draft given a set of criteria and provides feedback.
-  - Revisor - Revises the draft until it is satisfactory based on the reviewer feedback.
-- Writer - Compiles and writes the final report including an introduction, conclusion and references section from the given research findings.
+  - `check_data` - Accepts, retries, or blocks each section based on evidence coverage and atomic constraints.
+- Writer - Compiles the final report layout from the validated section findings and cites evidence with `[S*]` source IDs.
+- ClaimVerifier - Parses the writer output, classifies claims (`HIGH` / `MEDIUM` / `SUSPICIOUS` / `HALLUCINATION`), and can trigger targeted section reruns for suspicious evidence conflicts.
+- Reviewer - Validates the final draft against guidelines and available evidence, including source-aware auditing of reviser changes.
+- Reviser - Revises the final draft until it is satisfactory based on the reviewer feedback.
 - Publisher - Publishes the final report to multi formats such as PDF, Docx, Markdown, etc.
 
 ### Session persistence

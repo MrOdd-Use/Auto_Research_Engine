@@ -41,6 +41,47 @@
 **优化：** 更完整的评测矩阵怎么做？  
 答题要点：加入引用覆盖率、来源多样性、时间一致性、冲突率；建立失败样本库与回归门禁（可选升级）。
 
+**补充：如何评估系统生成的长文档？**
+答题要点：不要把整篇报告当成一个“答案”来打分，而要拆成 `文档 -> 章节 -> claim -> 引用/来源` 四层。
+
+- `Accuracy`：长文建议改成 claim-level accuracy，而不是整篇文档 accuracy。
+  ```text
+  claim_accuracy = supported_claims / judged_claims
+  ```
+- `F1`：只有在有 gold claims 或 gold outline 时才有意义。
+  ```text
+  precision = matched_supported_claims / predicted_claims
+  recall = matched_gold_claims / gold_claims
+  f1 = 2PR / (P + R)
+  ```
+- `hallucination_rate`：建议用 claim 级未支撑率。
+  ```text
+  hallucination_rate = unsupported_claims / total_claims
+  ```
+- `引用覆盖率`：至少分成“有引用”和“引用确实支撑内容”两层。
+  ```text
+  citation_coverage = claims_with_citation / claims_requiring_citation
+  supported_citation_coverage = claims_with_valid_supporting_citation / claims_requiring_citation
+  ```
+- `来源多样性`：不要只看 URL 数量，至少看 `unique_domains`、`top1_domain_share`、`source_type_count`、`domain_entropy`。
+- `报告完整性`：用 planner 产出的 `section_details`、`research_queries`、`key_points` 做对照，统计 `section_completion`、`query_coverage`、`keypoint_coverage`。
+
+**在本项目里的落点：**
+- `evals/hallucination_eval/`：适合做 report-vs-source groundedness。
+- `multi_agents/agents/check_data.py`：已有 `final_score`、`section_coverage`、`ACCEPT/RETRY/BLOCKED`，适合做章节级质量信号。
+- `multi_agents/agents/claim_verifier.py`：在线产出 `source_index`、`claim_annotations`、`claim_confidence_report`，适合做断言级引用覆盖和冲突分布统计。
+- `backend/server/server_utils.py`：日志里已有 `query/sources/context/report/costs`，适合抽取文档级统计。
+- `multi_agents/workflow_session.py`：有 checkpoint，可做章节级回归与 rerun 分析。
+
+**推荐的文档评分卡（可选升级）：**
+```text
+groundedness = 1 - hallucination_rate
+citation_quality = supported_citation_coverage
+completeness = 0.5 * section_completion
+             + 0.3 * keypoint_coverage
+             + 0.2 * query_coverage
+```
+
 ---
 
 ### Q18（基础）：你如何做可观测性/Tracing？为什么要分“研究模型”和“评测模型”？
@@ -60,7 +101,7 @@
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：运行期通过 websocket/日志把每个阶段的事件与产物输出；同时支持 LangSmith tracing（`LANGCHAIN_TRACING_V2`、`LANGCHAIN_API_KEY`）（见 `backend/server/server_utils.py`、`docs/docs/gpt-researcher/handling-logs/langsmith-logs.md`）。配置层面区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`），评测脚本也可用独立 grader 模型（见 `evals/README.md`）。
+- 实现：运行期通过 websocket/日志把每个阶段的事件与产物输出；ClaimVerifier 还会记录 citation coverage fallback、claim counts 与 suspicious/hallucination 数量；同时支持 LangSmith tracing（`LANGCHAIN_TRACING_V2`、`LANGCHAIN_API_KEY`）（见 `backend/server/server_utils.py`、`docs/docs/gpt-researcher/handling-logs/langsmith-logs.md`）。配置层面区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`），评测脚本也可用独立 grader 模型（见 `evals/README.md`）。
 - 为什么：研究链路长、节点多；必须可观测才能定位慢点/贵点/错点，同时把“产出模型”和“评测模型”分离以减少自评偏差。
 - 利弊：利是更易调参与成本分析；弊是 tracing 带来额外开销与数据合规/隐私治理需求。
 

@@ -14,7 +14,8 @@ This document describes the current repository layout and the intended ownership
   - `backend/utils.py` contains shared export utilities (Markdown, PDF, DOCX).
 
 - `multi_agents/`
-  - Multi-agent orchestration flow (editor/researcher/reviewer/writer/publisher).
+  - Multi-agent orchestration flow (editor/researcher/check_data/writer/claim_verifier/reviewer/reviser/publisher).
+  - `workflow_session.py` and backend workflow storage persist rerunnable global and section checkpoints.
   - Uses the same backend export styling for PDF generation.
 
 - `frontend/`

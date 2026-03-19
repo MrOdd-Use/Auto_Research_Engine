@@ -26,8 +26,8 @@
 > **举例提示（面试官听不懂就用）：** 把本题映射到“AI 对就业市场的影响”示例卡片来讲——先追问口径 → 产出结构化大纲（`section_details`）→ 按章生成 `research_queries` → 证据采集与门禁 → 写作/审阅/发布。这样抽象概念会变成“我在这个例子里具体做了什么”。
 > 本题映射：示例里如果证据与口径不匹配（时间窗/地域/指标缺失），就应触发 RETRY 回到补检索；证据明显不足则 BLOCKED，避免输出高风险结论。
 
-**定义：** Check Data 与 Reviewer 的分工？  
-答题要点：Check Data 面向证据与口径；Reviewer 面向稿件可发布性与指南。
+**定义：** Check Data、ClaimVerifier、Reviewer 的分工？
+答题要点：Check Data 面向章节证据与口径；ClaimVerifier 面向 Writer 断言级引用与冲突；Reviewer 面向终稿可发布性、指南满足与 source-aware 修订审查。
 
 **实现：** 回流怎么触发？  
 答题要点：章节级 workflow 读取 `check_data_action`，`retry` 回到研究节点，`accept/blocked` 结束该章。
@@ -167,25 +167,26 @@
 
 ---
 
-### Q33（复杂）：如果把 Check Data 升级为“断言级证据对齐（claim-evidence alignment）”，你会怎么改数据结构与路由？
+### Q33（复杂）：当前仓库已经有 ClaimVerifier；如果把这种“断言级证据对齐（claim-evidence alignment）”进一步前移到 Check Data，你会怎么改数据结构与路由？
 
 **标准答案（可直接说）：**
-一句话：把输出拆成可验证 claims，并为每条 claim 绑定证据片段与引用跨度；路由基于“未支撑/矛盾 claim 比例”触发补检索或降级输出，实现更强事实对齐（可选升级）。
+一句话：当前仓库已在 Writer 之后通过 `ClaimVerifier` 做断言级引用校验；如果继续把这套能力前移到 Check Data，就需要把章节证据也拆成可验证 claims，并基于“未支撑/矛盾 claim 比例”更早驱动补检索。
 
-展开：升级可分三步：先在证据包里保留更结构化片段（句子/段落级 + 来源 URL + 元数据），并在写作中输出 claims 列表（主体、谓词、客体、限定条件）。再对每条 claim 做支持/矛盾/未知判定（NLI 或 LLM-judge），输出缺口清单与建议查询模板。最后把校验结果写回 state，路由基于阈值触发 RETRY/BLOCKED/ACCEPT。相比关键词守卫，这能覆盖细粒度事实错误并给出可解释缺口。
+展开：当前实现里，Writer 会输出 `claim_annotations`，ClaimVerifier 会基于 append-only `source_index` 对引言/结论做 `HIGH/MEDIUM/SUSPICIOUS/HALLUCINATION` 分级，并在 `SUSPICIOUS` 时触发按章节的 Reflexion 补检索。若继续把这套能力前移到 Check Data，可分三步：先在章节证据包里保留更结构化片段（句子/段落级 + 来源 URL + 元数据），再把章节草稿拆成 claims 并做支持/矛盾/未知判定，最后把缺口清单与建议查询模板直接写回 `DraftState`，让 `check_data_action` 更早基于 claim 级结果触发 RETRY/BLOCKED/ACCEPT。
 
 常见坑/反杀点：
-- 要明确这是可选升级，不是仓库现状。
+- 要明确“Writer 后 ClaimVerifier 已是仓库现状”，可选升级的是“把同类能力前移到 Check Data 阶段”。
 - 面试官会追问成本：要讲分层校验与只对关键断言深校验。
 
 **相关模块（对应实现）：**
 - multi_agents/agents/check_data.py
+- multi_agents/agents/claim_verifier.py
 - multi_agents/agents/scrap.py
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 现状：当前门禁主要是“原子约束 + 字符串匹配 + 分数阈值”，还没做到断言级引用跨度绑定（见 `multi_agents/agents/check_data.py`）。
-- 升级实现（可选升级）：在 `DraftState`/`ResearchState` 增加 `claims`（列表）与 `claim_evidence`（支持/矛盾/未知 + 引用片段/URL），路由规则改为“未知/矛盾 claim 触发 RETRY 并生成定向查询”，Writer 输出强制 claim→citation 对齐。
+- 现状：Check Data 仍主要是“原子约束 + 字符串匹配 + 分数阈值”的章节级 gate；但 Writer 后已经有 `ClaimVerifier` 做断言级引用解析、跨域佐证、冲突检测与 `section_key` 级 Reflexion 路由（见 `multi_agents/agents/check_data.py`、`multi_agents/agents/claim_verifier.py`）。
+- 升级实现（可选升级）：在 `DraftState`/`ResearchState` 增加 `claims`（列表）与 `claim_evidence`（支持/矛盾/未知 + 引用片段/URL），把“未知/矛盾 claim 触发 RETRY 并生成定向查询”的规则直接前移到章节门禁，让 Writer 进入时拿到更干净的证据集合。
 - 利弊：利是可验证性显著提升；弊是抽取/对齐本身成本高且易错，需要更强的评测与人工抽检闭环。
 
 **追问链（定义 → 实现 → 边界 → 取舍 → 优化）：**

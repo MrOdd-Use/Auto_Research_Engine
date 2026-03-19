@@ -17,6 +17,8 @@ It is built for research-heavy workflows such as market analysis, technical inve
 - **Multi-agent by default.** The system separates planning, retrieval, evidence gating, writing, review, and publishing into specialized agents.
 - **Web and document research.** Use search, scraping, local files, or hybrid workflows in the same pipeline.
 - **Section-level parallelism.** Reports are decomposed into sections that can be researched independently and then merged.
+- **Source-grounded final drafting.** Writer consumes an append-only `source_index`, emits `claim_annotations`, and gives each factual claim explicit `[S*]` citations.
+- **Built-in claim verification.** `ClaimVerifier` grades claims as `HIGH` / `MEDIUM` / `SUSPICIOUS` / `HALLUCINATION` and can trigger targeted section reruns for suspicious evidence conflicts.
 - **Node rerun support.** `节点回溯` (`Rerun from Checkpoint`) lets you rerun a single workflow node or section instead of restarting the entire report.
 - **Production-facing interfaces.** The repo includes FastAPI, WebSocket streaming, a Next.js frontend, CLI usage, exports, tests, and docs.
 - **Pluggable architecture.** Retrievers, scrapers, model providers, vector stores, and MCP integrations can be swapped without redesigning the whole stack.
@@ -27,8 +29,9 @@ It is built for research-heavy workflows such as market analysis, technical inve
 2. The planner creates a structured outline from the task and the initial research context.
 3. Each section runs through its own research pipeline in parallel.
 4. `check_data` decides whether the evidence for a section is sufficient, should retry, or should stop.
-5. The writer composes the full report from the validated section outputs.
-6. Reviewer and reviser agents refine the final draft before the publisher exports Markdown, PDF, and DOCX.
+5. The writer composes the introduction and conclusion from indexed section evidence and emits `claim_annotations`.
+6. `ClaimVerifier` parses citations, checks support across domains, and can trigger targeted `Reflexion` reruns for suspicious sections.
+7. Reviewer and reviser agents run a final quality loop with guideline checks plus source-aware hallucination auditing before the publisher exports Markdown, PDF, and DOCX.
 
 ## Node Rerun
 
@@ -164,7 +167,7 @@ tests/            Automated tests
 ## Project Highlights
 
 - `gpt_researcher/` contains the core retrieve-scrape-compress-write engine
-- `multi_agents/` adds planning, section-level research, evidence gating, and final review loops
+- `multi_agents/` adds planning, section-level research, append-only source indexing, claim verification, and final review loops
 - `backend/server/workflow_store.py` persists workflow sessions for `Rerun from Checkpoint`
 - `frontend/nextjs/` provides report history, session switching, and rerun controls
 - `tests/test_workflow_sessions.py` covers multi-round reruns and checkpoint behavior

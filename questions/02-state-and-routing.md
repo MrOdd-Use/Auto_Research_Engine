@@ -47,9 +47,9 @@
 ### Q21（复杂）：你们如何建模状态（`ResearchState` / `DraftState`）？哪些字段用于路由与回流？
 
 **标准答案（可直接说）：**
-一句话：全局链路用 `ResearchState` 表达，章节级并行深研用 `DraftState` 表达；路由与回流主要依赖 `human_feedback`、审阅反馈是否为空、以及 Check Data 输出的 `accept/retry/blocked` 等信号。
+一句话：全局链路用 `ResearchState` 表达，章节级并行深研用 `DraftState` 表达；路由与回流主要依赖 `human_feedback`、ClaimVerifier/Reviewer 的反馈信号、以及 Check Data 输出的 `accept/retry/blocked` 等信号。
 
-展开：`ResearchState` 承载端到端流程所需的关键信息：初始资料收集结果、章节列表与结构化详情、并行深研结果、写作生成的布局要素、审阅/修订信息、最终稿与发布内容等。`DraftState` 承载单章节研究输入（topic、研究上下文、额外约束提示）与输出（草稿、证据包、校验结论、审阅意见、修订说明）。路由上：HITL 依据 `human_feedback`；终稿审阅依据 `review` 是否为空；章节研究闭环依据 `check_data_action`。
+展开：`ResearchState` 承载端到端流程所需的关键信息：初始资料收集结果、章节列表与结构化详情、并行深研结果、写作生成的布局要素、`source_index` / `claim_annotations` / `claim_confidence_report` 等事实性状态、审阅/修订信息、最终稿与发布内容等。`DraftState` 承载单章节研究输入（topic、研究上下文、额外约束提示）与输出（草稿、证据包、校验结论、审阅意见、修订说明）。路由上：HITL 依据 `human_feedback`；claim reflexion 依据可疑断言映射到 `section_key`；终稿审阅依据 `review` 是否为空；章节研究闭环依据 `check_data_action`。
 
 常见坑/反杀点：
 - 只讲概念不讲字段；面试官会追问 state 里到底有什么。
@@ -74,7 +74,7 @@
 答题要点：全局管路由与汇总；章节管并行与局部闭环；降低耦合、提高可扩展。
 
 **实现：** 哪些字段最关键？  
-答题要点：全局有 `section_details/research_data/final_draft/report` 等；章节有 `topic/research_context/extra_hints/check_data_action/draft/review` 等。
+答题要点：全局有 `section_details/research_data/source_index/claim_confidence_report/final_draft/report` 等；章节有 `topic/research_context/extra_hints/check_data_action/draft/review` 等。
 
 **边界：** state 过大有什么问题？  
 答题要点：序列化成本高、调试难、隐私风险；需要分层与摘要化（可选升级）。
@@ -135,14 +135,20 @@
 - `introduction`：引言（markdown 文本）。
 - `conclusion`：结论（markdown 文本）。
 - `sources`：参考来源列表（通常是 URL 或引用条目字符串）。
+- `claim_annotations`：Writer 输出的断言-引用映射（每条 factual claim 对应哪些 `S*` source IDs）。
+- `source_index`：append-only 证据索引，形如 `S1 -> {content, source_url, domain, section_key}`，供 Writer、ClaimVerifier、Reviewer 共用。
+- `indexed_research_data`：把 `source_index` 渲染成 Writer 可直接消费的带 `[S*]` 证据文本。
+- `claim_confidence_report`：ClaimVerifier 产出的断言级校验结果（包含 `confidence/note/source_ids/source_urls` 等）。
+- `claim_reflexion_iterations`：ClaimVerifier/Reflexion 触发的补检索轮次计数。
 - `final_draft`：终稿正文（审阅/修订循环中的当前版本）。
 - `review`：终稿审阅意见（为 `None` 表示通过；非空表示需要修订）。
 - `revision_notes`：终稿修订说明（用于下一轮审阅的上下文）。
 - `review_iterations`：终稿审阅-修订已循环的次数（用于上限保护）。
+- `_draft_before_revision`：Reviewer 做 diff-based source audit 时，用来对比 Reviser 修改前后的终稿版本。
 - `report`：发布阶段输出的最终报告文本（通常为完整 markdown）。
 
 **这些字段是如何产生的？（全局链路，口述版）**
-全局流程从 `task` 启动，先在初始研究阶段写入 `initial_research`，供后续规划使用（见 `multi_agents/agents/orchestrator.py`）。规划阶段会基于初始研究生成章节结构与可执行细节，写入 `section_details`（并保留兼容字段 `sections`），同时补齐 `title/date` 等全局信息（见 `multi_agents/agents/editor.py`、`multi_agents/memory/research.py`）。如果开启 HITL，`human_feedback` 用来决定是否接受大纲或回流重规划（见 `multi_agents/agents/orchestrator.py`）。进入并行深研后，每章会跑各自的章节闭环，再把章节草稿聚合到 `research_data`，证据包聚合到 `scrap_packets`，门禁报告聚合到 `check_data_reports`（见 `multi_agents/agents/editor.py`）。Writer 会在聚合结果之上生成引言/结论/目录/来源与版式标题等内容，写入 `introduction/conclusion/table_of_contents/sources/headers`（见 `multi_agents/agents/writer.py`、`multi_agents/memory/research.py`）。终稿层面再进入审阅/修订循环：`review/revision_notes/review_iterations` 记录审阅意见、修订说明与回合数，`final_draft` 保存当前可发布版本（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。最后 Publisher 生成完整布局写入 `report` 并导出多格式文件（见 `multi_agents/agents/publisher.py`）。
+全局流程从 `task` 启动，先在初始研究阶段写入 `initial_research`，供后续规划使用（见 `multi_agents/agents/orchestrator.py`）。规划阶段会基于初始研究生成章节结构与可执行细节，写入 `section_details`（并保留兼容字段 `sections`），同时补齐 `title/date` 等全局信息（见 `multi_agents/agents/editor.py`、`multi_agents/memory/research.py`）。如果开启 HITL，`human_feedback` 用来决定是否接受大纲或回流重规划（见 `multi_agents/agents/orchestrator.py`）。进入并行深研后，每章会跑各自的章节闭环，再把章节草稿聚合到 `research_data`，证据包聚合到 `scrap_packets`，门禁报告聚合到 `check_data_reports`（见 `multi_agents/agents/editor.py`）。Writer 会在聚合结果之上生成引言/结论/目录/来源、`claim_annotations` 与版式标题等内容，写入 `introduction/conclusion/table_of_contents/sources/claim_annotations/headers`（见 `multi_agents/agents/writer.py`、`multi_agents/memory/research.py`）。随后 ClaimVerifier 会构建 `source_index`、刷新 `indexed_research_data`、输出 `claim_confidence_report`，并在必要时触发按章节的 reflexion rerun（见 `multi_agents/agents/claim_verifier.py`、`multi_agents/agents/orchestrator.py`）。终稿层面再进入审阅/修订循环：`review/revision_notes/review_iterations/_draft_before_revision` 记录审阅意见、修订说明、回合数与 diff 对照基线，`final_draft` 保存当前可发布版本（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。最后 Publisher 生成完整布局写入 `report` 并导出多格式文件（见 `multi_agents/agents/publisher.py`）。
 
 常见坑/反杀点：
 - `sections` vs `section_details`：前者是“仅标题”的旧结构，后者是可执行的结构化大纲；面试要说清楚两者关系。
@@ -156,7 +162,7 @@
 **一句话结论：** 全局 state 管聚合与终稿，章节 state 管单章证据闭环；路由只看少量“信号字段”。
 
 **实现落点：**
-- `multi_agents/memory/research.py`：`ResearchState`（全局）含 `human_feedback`（HITL 路由）、`review`（终稿接受/修订）、`review_iterations`（终稿上限）、以及聚合字段 `scrap_packets/check_data_reports`。
+- `multi_agents/memory/research.py`：`ResearchState`（全局）含 `human_feedback`（HITL 路由）、`claim_confidence_report/source_index`（Writer 后事实性状态）、`review`（终稿接受/修订）、`review_iterations`（终稿上限）、以及聚合字段 `scrap_packets/check_data_reports`。
 - `multi_agents/memory/draft.py`：`DraftState`（章节）含 `check_data_action`（accept/retry/blocked）、`iteration_index`、`extra_hints`、`scrap_packet`、`check_data_verdict`。
 - `multi_agents/agents/editor.py`：章节级 workflow 读取 `check_data_action` 决定重试还是结束该章。
 
@@ -165,7 +171,8 @@
 
 **追问补充：回流重跑是全量还是增量？状态如何复用/回滚？**
 - HITL 回流是“规划节点重跑”：有 `human_feedback` 时回到 planner，但不会回到 `browser`（初始研究复用），因此不是全链路全量重跑。
-- 章节证据回流发生在 `DraftState` 内：`check_data_action=retry` 会路由回章节 researcher/scrap，`iteration_index` 递增；当前没有 checkpoint 语义的状态回滚，属于“按轮次重试、用新产物覆盖旧产物”。
+- 章节证据回流发生在 `DraftState` 内：`check_data_action=retry` 会路由回章节 researcher/scrap，`iteration_index` 递增；ClaimVerifier 的 `SUSPICIOUS` 断言也会按真实 `section_key` 触发章节级 rerun，并在重跑后只追加新的 evidence 到 `source_index`。
+- `Rerun from Checkpoint` 是另一条更广义的回放链路：`multi_agents/workflow_session.py` 会持久化 global/section checkpoints，手动 rerun 会从选中的 checkpoint 恢复 `state_before` 并重算下游路径，同时保留 parent/child session 历史与 `last_successful_session_id`。
 - 缓存现状：ASA `ScrapAgent` 没有跨轮 evidence cache；每轮仅做 URL 归一化去重与抓取物化，再进入分段与 MMR 选片。可选升级：跨轮缓存“已抓取正文/已选片段”并做内容级 canonical，以减少重复抓取与同质证据。
 
 **利弊与边界：**
