@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
+from multi_agents.route_agent import build_route_context
 from .utils.llms import call_model
 from .utils.views import print_agent_output
 
@@ -238,7 +239,16 @@ Return ONLY the JSON array, no markdown fences.""",
             },
         ]
 
-        result = await call_model(prompt, model=model, response_format="json")
+        route_context = build_route_context(
+            application_name=str(writer_output.get("application_name") or "auto_research_engine"),
+            shared_agent_class="claim_verifier_agent",
+            agent_role="claim_verifier",
+            stage_name="fallback_claim_matching",
+            system_prompt="You are a fact-checking assistant.",
+            task=combined_text,
+            extra={},
+        )
+        result = await call_model(prompt, model=model, response_format="json", route_context=route_context)
         if not isinstance(result, list):
             return []
 
@@ -315,7 +325,15 @@ Return ONLY the JSON, no markdown fences.""",
             },
         ]
 
-        result = await call_model(prompt, model=model, response_format="json")
+        route_context = build_route_context(
+            application_name="auto_research_engine",
+            shared_agent_class="claim_verifier_agent",
+            agent_role="claim_verifier",
+            stage_name="conflict_detection",
+            system_prompt="You are a fact-checking assistant that detects contradictions between sources.",
+            task=str(claim.get("claim_text") or ""),
+        )
+        result = await call_model(prompt, model=model, response_format="json", route_context=route_context)
         if not isinstance(result, dict):
             return {"has_conflict": False, "conflict_detail": ""}
 

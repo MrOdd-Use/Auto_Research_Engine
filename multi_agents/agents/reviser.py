@@ -1,6 +1,7 @@
 from .utils.views import print_agent_output
 from .utils.llms import call_model
 import json
+from multi_agents.route_agent import build_route_context
 
 sample_revision_notes = """
 {
@@ -61,10 +62,21 @@ You MUST return nothing but a JSON in the following format:
             },
         ]
 
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="reviser_agent",
+            agent_role="reviser",
+            stage_name="draft_revision",
+            system_prompt="You are an expert writer. Your goal is to revise drafts based on reviewer notes.",
+            task=str(task.get("query") or ""),
+            state=draft_state,
+            task_payload=task,
+        )
         response = await call_model(
             prompt,
             model=task.get("model"),
             response_format="json",
+            route_context=route_context,
         )
         return response
 

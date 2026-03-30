@@ -23,6 +23,7 @@ langchain = "^1.0.0"
 langchain-classic = "^1.0.0"
 langchain_community = "^0.4.0"
 langchain-core = "^1.0.0"
+langchain-deepseek = ">=1.0.0"
 langchain-openai = "^1.0.0"
 langchain-text-splitters = "^1.0.0"
 langgraph = ">=0.2.73,<0.3"
@@ -85,7 +86,7 @@ dependencies = [
     "brotli>=1.1.0",
     "certifi>=2025.4.26",
     "cffi>=1.17.1",
-    "chardet>=5.2.0",
+    "chardet>=5.2.0,<6",
     "charset-normalizer>=3.4.2",
     "click>=8.1.0",
     "colorama>=0.4.6",
@@ -128,6 +129,7 @@ dependencies = [
     "langchain-classic>=1.0.0",
     "langchain-community>=0.4.0",
     "langchain-core>=1.0.0",
+    "langchain-deepseek>=1.0.0",
     "langchain-ollama>=1.0.0",
     "langchain-openai>=1.0.0",
     "langchain-text-splitters>=1.0.0",

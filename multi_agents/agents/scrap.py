@@ -17,6 +17,7 @@ from gpt_researcher.config.config import Config
 from gpt_researcher.memory.embeddings import Memory
 from gpt_researcher.utils.workers import WorkerPool
 
+from multi_agents.route_agent import build_route_context
 from .state_controller import StateController
 from .utils.llms import call_model
 from .utils.views import print_agent_output
@@ -136,6 +137,8 @@ class ScrapAgent:
                         research_context=research_context,
                         extra_hints=extra_hints_applied,
                         model_name=model_name,
+                        task_payload=task,
+                        draft_state=draft_state,
                     )
                     validation = self._validate_and_filter_targets(
                         source_query=source_query,
@@ -296,6 +299,8 @@ class ScrapAgent:
         research_context: dict,
         extra_hints: str,
         model_name: str,
+        task_payload: dict | None = None,
+        draft_state: dict | None = None,
     ) -> List[str]:
         description = str(research_context.get("description") or "")
         key_points = research_context.get("key_points") or []
@@ -324,7 +329,17 @@ class ScrapAgent:
             },
         ]
         try:
-            response = await call_model(prompt=prompt, model=model_name)
+            route_context = build_route_context(
+                application_name=str((task_payload or {}).get("application_name") or "auto_research_engine"),
+                shared_agent_class="scrape_agent",
+                agent_role="scrap",
+                stage_name="target_decomposition",
+                system_prompt="You decompose one source query into smaller search targets.",
+                task=source_query,
+                state=draft_state,
+                task_payload=task_payload or {},
+            )
+            response = await call_model(prompt=prompt, model=model_name, route_context=route_context)
         except Exception as exc:
             self.logger.warning(f"Failed to decompose source query '{source_query}': {exc}")
             return []

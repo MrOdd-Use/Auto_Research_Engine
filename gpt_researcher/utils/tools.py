@@ -13,6 +13,8 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.tools import tool
 
 from .llm import create_chat_completion
+from multi_agents.route_agent import current_route_scope, get_global_invoker
+from multi_agents.route_agent.utils.model_utils import normalize_app_provider
 
 logger = logging.getLogger(__name__)
 
@@ -54,122 +56,126 @@ async def create_chat_completion_with_tools(
         Exception: If tool-enabled completion fails, falls back to simple completion
     """
     try:
-        from ..llm_provider.generic.base import GenericLLMProvider
-        
-        # Create LLM provider using the config
-        provider_kwargs = {
-            'model': model,
-            **(llm_kwargs or {})
-        }
-        
-        llm_provider_instance = GenericLLMProvider.from_provider(
-            llm_provider, 
-            **provider_kwargs
-        )
-        
-        # Convert messages to LangChain format
-        lc_messages = []
-        for msg in messages:
-            if msg["role"] == "system":
-                lc_messages.append(SystemMessage(content=msg["content"]))
-            elif msg["role"] == "user":
-                lc_messages.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                lc_messages.append(AIMessage(content=msg["content"]))
-        
-        # Bind tools to the LLM - this works across all LangChain providers that support function calling
-        llm_with_tools = llm_provider_instance.llm.bind_tools(tools)
-        
-        # Invoke the LLM with tools - this will handle the full conversation flow
-        logger.info(f"Invoking LLM with {len(tools)} available tools")
-        
-        # For tool calling, we need to handle the full conversation including tool responses
-        from langchain_core.messages import ToolMessage
-        
-        # First call to LLM
-        response = await llm_with_tools.ainvoke(lc_messages)
-        
-        # Process tool calls if any were made
-        tool_calls_metadata = []
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            logger.info(f"LLM made {len(response.tool_calls)} tool calls")
-            
-            # Add the assistant's response with tool calls to the conversation
-            lc_messages.append(response)
-            
-            # Execute each tool call and add results to conversation
-            for tool_call in response.tool_calls:
-                tool_name = tool_call.get('name', 'unknown')
-                tool_args = tool_call.get('args', {})
-                tool_id = tool_call.get('id', '')
-                
-                logger.info(f"Tool called: {tool_name}")
-                if tool_args:
-                    args_str = ", ".join([f"{k}={v}" for k, v in tool_args.items()])
-                    logger.debug(f"Tool arguments: {args_str}")
-                
-                # Find and execute the tool
-                tool_result = "Tool execution failed"
-                for tool in tools:
-                    if tool.name == tool_name:
-                        try:
-                            if hasattr(tool, 'ainvoke'):
-                                tool_result = await tool.ainvoke(tool_args)
-                            elif hasattr(tool, 'invoke'):
-                                tool_result = tool.invoke(tool_args)
-                            else:
-                                tool_result = await tool(**tool_args) if asyncio.iscoroutinefunction(tool) else tool(**tool_args)
-                            break
-                        except Exception as e:
-                            error_type = type(e).__name__
-                            error_msg = str(e)
-                            logger.error(
-                                f"Error executing tool '{tool_name}': {error_type}: {error_msg}",
-                                exc_info=True
-                            )
-                            # Provide user-friendly error message
-                            if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                                tool_result = f"Tool '{tool_name}' timed out. The operation took too long to complete. Please try again or check your network connection."
-                            elif "connection" in error_msg.lower() or "network" in error_msg.lower():
-                                tool_result = f"Tool '{tool_name}' failed due to a network issue. Please check your internet connection and try again."
-                            elif "permission" in error_msg.lower() or "access" in error_msg.lower():
-                                tool_result = f"Tool '{tool_name}' failed due to insufficient permissions. Please check your API keys or access credentials."
-                            else:
-                                tool_result = f"Tool '{tool_name}' encountered an error: {error_msg}. Please check the logs for more details."
-                
-                # Add tool result to conversation
-                tool_message = ToolMessage(content=str(tool_result), tool_call_id=tool_id)
-                lc_messages.append(tool_message)
-                
-                # Add to metadata
-                tool_calls_metadata.append({
-                    "tool": tool_name,
-                    "args": tool_args,
-                    "call_id": tool_id,
-                    "result": str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
-                })
-            
-            # Get final response from LLM after tool execution
-            logger.info("Getting final response from LLM after tool execution")
-            final_response = await llm_with_tools.ainvoke(lc_messages)
-            
-            # Track costs if callback provided
-            if cost_callback:
-                from .costs import estimate_llm_cost
-                # Calculate costs for both calls
-                llm_costs = estimate_llm_cost(str(lc_messages), final_response.content or "")
-                cost_callback(llm_costs)
-            
-            return final_response.content, tool_calls_metadata
-        
-        else:
-            # No tool calls, return regular response
+        async def _provider_call(selected_model: str, selected_provider: str = "") -> Tuple[str, List[Dict[str, Any]]]:
+            from ..llm_provider.generic.base import GenericLLMProvider
+
+            effective_provider = normalize_app_provider(selected_provider or llm_provider or "")
+            provider_kwargs = {
+                'model': selected_model,
+                **(llm_kwargs or {})
+            }
+
+            llm_provider_instance = GenericLLMProvider.from_provider(
+                effective_provider,
+                **provider_kwargs
+            )
+
+            lc_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    lc_messages.append(SystemMessage(content=msg["content"]))
+                elif msg["role"] == "user":
+                    lc_messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    lc_messages.append(AIMessage(content=msg["content"]))
+
+            llm_with_tools = llm_provider_instance.llm.bind_tools(tools)
+            logger.info(f"Invoking LLM with {len(tools)} available tools")
+
+            from langchain_core.messages import ToolMessage
+
+            response = await llm_with_tools.ainvoke(lc_messages)
+
+            tool_calls_metadata = []
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                logger.info(f"LLM made {len(response.tool_calls)} tool calls")
+                lc_messages.append(response)
+
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call.get('name', 'unknown')
+                    tool_args = tool_call.get('args', {})
+                    tool_id = tool_call.get('id', '')
+
+                    logger.info(f"Tool called: {tool_name}")
+                    if tool_args:
+                        args_str = ", ".join([f"{k}={v}" for k, v in tool_args.items()])
+                        logger.debug(f"Tool arguments: {args_str}")
+
+                    tool_result = "Tool execution failed"
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            try:
+                                if hasattr(tool, 'ainvoke'):
+                                    tool_result = await tool.ainvoke(tool_args)
+                                elif hasattr(tool, 'invoke'):
+                                    tool_result = tool.invoke(tool_args)
+                                else:
+                                    tool_result = await tool(**tool_args) if asyncio.iscoroutinefunction(tool) else tool(**tool_args)
+                                break
+                            except Exception as e:
+                                error_type = type(e).__name__
+                                error_msg = str(e)
+                                logger.error(
+                                    f"Error executing tool '{tool_name}': {error_type}: {error_msg}",
+                                    exc_info=True
+                                )
+                                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                                    tool_result = f"Tool '{tool_name}' timed out. The operation took too long to complete. Please try again or check your network connection."
+                                elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+                                    tool_result = f"Tool '{tool_name}' failed due to a network issue. Please check your internet connection and try again."
+                                elif "permission" in error_msg.lower() or "access" in error_msg.lower():
+                                    tool_result = f"Tool '{tool_name}' failed due to insufficient permissions. Please check your API keys or access credentials."
+                                else:
+                                    tool_result = f"Tool '{tool_name}' encountered an error: {error_msg}. Please check the logs for more details."
+
+                    tool_message = ToolMessage(content=str(tool_result), tool_call_id=tool_id)
+                    lc_messages.append(tool_message)
+                    tool_calls_metadata.append({
+                        "tool": tool_name,
+                        "args": tool_args,
+                        "call_id": tool_id,
+                        "result": str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                    })
+
+                logger.info("Getting final response from LLM after tool execution")
+                final_response = await llm_with_tools.ainvoke(lc_messages)
+
+                if cost_callback:
+                    from .costs import estimate_llm_cost
+                    llm_costs = estimate_llm_cost(str(lc_messages), final_response.content or "")
+                    cost_callback(llm_costs)
+
+                return final_response.content, tool_calls_metadata
+
             if cost_callback:
                 from .costs import estimate_llm_cost
                 llm_costs = estimate_llm_cost(str(messages), response.content or "")
                 cost_callback(llm_costs)
-            
+
             return response.content, []
+
+        scope = current_route_scope()
+        route_request = None
+        if scope is not None:
+            route_request = scope.build_request(
+                task=_extract_user_task(messages),
+                system_prompt=_extract_system_prompt(messages),
+                requested_model=model or "",
+                llm_provider=llm_provider or "",
+                metadata={"tool_count": len(tools)},
+            )
+        return await get_global_invoker().invoke(
+            provider_call=_provider_call,
+            requested_model=model,
+            llm_provider=llm_provider or "",
+            route_request=route_request,
+            metadata={
+                "messages": messages,
+                "system_prompt": _extract_system_prompt(messages),
+                "task": _extract_user_task(messages),
+                "tool_count": len(tools),
+            },
+        )
         
     except Exception as e:
         error_type = type(e).__name__
@@ -193,6 +199,28 @@ async def create_chat_completion_with_tools(
             **kwargs
         )
         return response, []
+
+
+def _extract_system_prompt(messages: List[Dict[str, str]]) -> str:
+    parts = []
+    for msg in messages:
+        if str(msg.get("role") or "").lower() != "system":
+            continue
+        content = str(msg.get("content") or "").strip()
+        if content:
+            parts.append(content)
+    return "\n".join(parts).strip()
+
+
+def _extract_user_task(messages: List[Dict[str, str]]) -> str:
+    parts = []
+    for msg in messages:
+        if str(msg.get("role") or "").lower() not in {"user", "assistant"}:
+            continue
+        content = str(msg.get("content") or "").strip()
+        if content:
+            parts.append(content)
+    return "\n".join(parts).strip()
 
 
 def create_search_tool(search_function: Callable[[str], Dict]) -> Callable:

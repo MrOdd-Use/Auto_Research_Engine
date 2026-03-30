@@ -12,6 +12,7 @@ from langgraph.graph import StateGraph, END
 from gpt_researcher.utils.validators import ResearchOutline
 from .utils.views import print_agent_output
 from .utils.llms import call_model
+from multi_agents.route_agent import build_route_context
 from ..memory.draft import DraftState
 from .researcher import ResearchAgent
 from .scrap import ScrapAgent
@@ -87,10 +88,21 @@ class EditorAgent:
 
         print_agent_output(
             "Planning a structured outline based on initial research...", agent="EDITOR")
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="planner_agent",
+            agent_role="planner",
+            stage_name="outline_planning",
+            system_prompt=_PLANNING_SYSTEM_PROMPT,
+            task=query,
+            state=research_state,
+            task_payload=task,
+        )
         plan = await call_model(
             prompt=prompt,
             model=task.get("model"),
             response_format="json",
+            route_context=route_context,
         ) or {}
 
         outline = self._parse_outline(plan, max_sections, task)

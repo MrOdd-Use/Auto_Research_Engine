@@ -33,6 +33,7 @@ _SUPPORTED_PROVIDERS = {
     "vllm_openai",
     "aimlapi",
     "netmind",
+    "relay",
 }
 
 NO_SUPPORT_TEMPERATURE_MODELS = [
@@ -246,6 +247,15 @@ class GenericLLMProvider:
             from langchain_netmind import ChatNetmind
 
             llm = ChatNetmind(**kwargs)
+        elif provider == "relay":
+            _check_pkg("langchain_openai")
+            from langchain_openai import ChatOpenAI
+
+            llm = ChatOpenAI(
+                openai_api_base=os.environ["RELAY_BASE_URL"],
+                openai_api_key=os.environ["RELAY_API_KEY"],
+                **kwargs
+            )
         else:
             supported = ", ".join(_SUPPORTED_PROVIDERS)
             raise ValueError(

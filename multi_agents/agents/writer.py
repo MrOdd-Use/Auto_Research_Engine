@@ -2,6 +2,7 @@ from datetime import datetime
 import json5 as json
 from .utils.views import print_agent_output
 from .utils.llms import call_model
+from multi_agents.route_agent import build_route_context
 
 sample_json = """
 {
@@ -91,10 +92,21 @@ class WriterAgent:
             },
         ]
 
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="writer_agent",
+            agent_role="writer",
+            stage_name="draft_composition",
+            system_prompt="You are a research writer.",
+            task=query,
+            state=research_state,
+            task_payload=task,
+        )
         response = await call_model(
             prompt,
             task.get("model"),
             response_format="json",
+            route_context=route_context,
         )
         return response
 
@@ -123,10 +135,20 @@ Headers Data: {headers}\n
             },
         ]
 
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="writer_agent",
+            agent_role="writer",
+            stage_name="header_revision",
+            system_prompt="You are a research writer.",
+            task=str(task.get("query") or ""),
+            task_payload=task,
+        )
         response = await call_model(
             prompt,
             task.get("model"),
             response_format="json",
+            route_context=route_context,
         )
         return {"headers": response}
 

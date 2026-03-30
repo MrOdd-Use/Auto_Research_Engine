@@ -21,6 +21,8 @@ from gpt_researcher.llm_provider.generic.base import (
 from ..prompts import PromptFamily
 from .costs import estimate_llm_cost
 from .validators import Subtopics
+from multi_agents.route_agent import get_global_invoker
+from multi_agents.route_agent.utils.model_utils import normalize_app_provider
 
 
 def get_llm(llm_provider: str, **kwargs):
@@ -48,6 +50,7 @@ async def create_chat_completion(
         llm_kwargs: dict[str, Any] | None = None,
         cost_callback: callable = None,
         reasoning_effort: str | None = ReasoningEfforts.Medium.value,
+        route_context: dict[str, Any] | None = None,
         **kwargs
 ) -> str:
     """Create a chat completion using the OpenAI API
@@ -73,43 +76,66 @@ async def create_chat_completion(
         raise ValueError(
             f"Max tokens cannot be more than 32,000, but got {max_tokens}")
 
-    # Get the provider from supported providers
-    provider_kwargs = {'model': model}
+    base_provider_kwargs = dict(llm_kwargs or {})
 
-    if llm_kwargs:
-        provider_kwargs.update(llm_kwargs)
+    async def _provider_call(selected_model: str, selected_provider: str = "") -> str:
+        effective_provider = normalize_app_provider(selected_provider or llm_provider or "")
+        selected_provider_kwargs = dict(base_provider_kwargs)
+        selected_provider_kwargs["model"] = selected_model
+        if selected_model in SUPPORT_REASONING_EFFORT_MODELS:
+            selected_provider_kwargs["reasoning_effort"] = reasoning_effort
+        else:
+            selected_provider_kwargs.pop("reasoning_effort", None)
 
-    if model in SUPPORT_REASONING_EFFORT_MODELS:
-        provider_kwargs['reasoning_effort'] = reasoning_effort
+        if selected_model not in NO_SUPPORT_TEMPERATURE_MODELS:
+            selected_provider_kwargs["temperature"] = temperature
+            selected_provider_kwargs["max_tokens"] = max_tokens
+        else:
+            selected_provider_kwargs["temperature"] = None
+            selected_provider_kwargs["max_tokens"] = None
 
-    if model not in NO_SUPPORT_TEMPERATURE_MODELS:
-        provider_kwargs['temperature'] = temperature
-        provider_kwargs['max_tokens'] = max_tokens
-    else:
-        provider_kwargs['temperature'] = None
-        provider_kwargs['max_tokens'] = None
+        if effective_provider == "openai":
+            base_url = os.environ.get("OPENAI_BASE_URL", None)
+            if base_url:
+                selected_provider_kwargs["openai_api_base"] = base_url
+        provider = get_llm(effective_provider, **selected_provider_kwargs)
+        response = ""
+        for _ in range(10):  # maximum of 10 attempts
+            response = await provider.get_chat_response(
+                messages, stream, websocket, **kwargs
+            )
+            if cost_callback:
+                llm_costs = estimate_llm_cost(str(messages), response)
+                cost_callback(llm_costs)
+            return response
+        logging.error(f"Failed to get response from {effective_provider} API")
+        raise RuntimeError(f"Failed to get response from {effective_provider} API")
 
-    if llm_provider == "openai":
-        base_url = os.environ.get("OPENAI_BASE_URL", None)
-        if base_url:
-            provider_kwargs['openai_api_base'] = base_url
-
-    provider = get_llm(llm_provider, **provider_kwargs)
-    response = ""
-    # create response
-    for _ in range(10):  # maximum of 10 attempts
-        response = await provider.get_chat_response(
-            messages, stream, websocket, **kwargs
+    invoker = get_global_invoker()
+    if route_context:
+        return await invoker.invoke(
+            provider_call=_provider_call,
+            requested_model=model,
+            llm_provider=llm_provider or "",
+            route_request=route_context.get("route_request"),
+            metadata={
+                "messages": messages,
+                "system_prompt": route_context.get("system_prompt") or _extract_system_prompt(messages),
+                "task": route_context.get("task") or _extract_user_task(messages),
+                "route_context": route_context,
+            },
         )
 
-        if cost_callback:
-            llm_costs = estimate_llm_cost(str(messages), response)
-            cost_callback(llm_costs)
-
-        return response
-
-    logging.error(f"Failed to get response from {llm_provider} API")
-    raise RuntimeError(f"Failed to get response from {llm_provider} API")
+    return await invoker.invoke(
+        provider_call=_provider_call,
+        requested_model=model,
+        llm_provider=llm_provider or "",
+        metadata={
+            "messages": messages,
+            "system_prompt": _extract_system_prompt(messages),
+            "task": _extract_user_task(messages),
+        },
+    )
 
 
 async def construct_subtopics(
@@ -144,33 +170,47 @@ async def construct_subtopics(
                 "format_instructions": parser.get_format_instructions()},
         )
 
-        provider_kwargs = {'model': config.smart_llm_model}
-
-        if config.llm_kwargs:
-            provider_kwargs.update(config.llm_kwargs)
-
-        if config.smart_llm_model in SUPPORT_REASONING_EFFORT_MODELS:
-            provider_kwargs['reasoning_effort'] = ReasoningEfforts.High.value
-        else:
-            provider_kwargs['temperature'] = config.temperature
-            provider_kwargs['max_tokens'] = config.smart_token_limit
-
-        provider = get_llm(config.smart_llm_provider, **provider_kwargs)
-
-        model = provider.llm
-
-        chain = prompt | model | parser
-
-        output = await chain.ainvoke({
-            "task": task,
-            "data": data,
-            "subtopics": subtopics,
-            "max_subtopics": config.max_subtopics
-        }, **kwargs)
-
-        return output
+        prompt_value = prompt.format(
+            task=task,
+            data=data,
+            subtopics=subtopics,
+            max_subtopics=config.max_subtopics,
+        )
+        output = await create_chat_completion(
+            messages=[{"role": "user", "content": prompt_value}],
+            model=config.smart_llm_model,
+            temperature=config.temperature,
+            max_tokens=config.smart_token_limit,
+            llm_provider=config.smart_llm_provider,
+            llm_kwargs=config.llm_kwargs,
+            reasoning_effort=ReasoningEfforts.High.value,
+            **kwargs,
+        )
+        return parser.parse(output)
 
     except Exception as e:
         print("Exception in parsing subtopics : ", e)
         logging.getLogger(__name__).error("Exception in parsing subtopics : \n {e}")
         return subtopics
+
+
+def _extract_system_prompt(messages: list[dict[str, str]]) -> str:
+    parts = []
+    for item in messages or []:
+        if str(item.get("role") or "").lower() != "system":
+            continue
+        content = str(item.get("content") or "").strip()
+        if content:
+            parts.append(content)
+    return "\n".join(parts).strip()
+
+
+def _extract_user_task(messages: list[dict[str, str]]) -> str:
+    parts = []
+    for item in messages or []:
+        if str(item.get("role") or "").lower() not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content") or "").strip()
+        if content:
+            parts.append(content)
+    return "\n".join(parts).strip()

@@ -7,6 +7,9 @@ import asyncio
 import logging
 from typing import List, Dict, Any
 
+from multi_agents.route_agent import current_route_scope, get_global_invoker
+from multi_agents.route_agent.utils.model_utils import normalize_app_provider
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,106 +53,103 @@ class MCPResearchSkill:
         
         try:
             from ..llm_provider.generic.base import GenericLLMProvider
-            
-            # Create LLM provider using the config
-            provider_kwargs = {
-                'model': self.cfg.strategic_llm_model,
-                **self.cfg.llm_kwargs
-            }
-            
-            llm_provider = GenericLLMProvider.from_provider(
-                self.cfg.strategic_llm_provider, 
-                **provider_kwargs
-            )
-            
-            # Bind tools to LLM
-            llm_with_tools = llm_provider.llm.bind_tools(selected_tools)
-            
-            # Import here to avoid circular imports
             from ..prompts import PromptFamily
-            
-            # Create research prompt
-            research_prompt = PromptFamily.generate_mcp_research_prompt(query, selected_tools)
 
-            # Create messages
+            research_prompt = PromptFamily.generate_mcp_research_prompt(query, selected_tools)
             messages = [{"role": "user", "content": research_prompt}]
-            
-            # Invoke LLM with tools
-            logger.info("LLM researching with bound tools...")
-            response = await llm_with_tools.ainvoke(messages)
-            
-            # Process tool calls and results
-            research_results = []
-            
-            # Check if the LLM made tool calls
-            if hasattr(response, 'tool_calls') and response.tool_calls:
-                logger.info(f"LLM made {len(response.tool_calls)} tool calls")
-                
-                # Process each tool call
-                for i, tool_call in enumerate(response.tool_calls, 1):
-                    tool_name = tool_call.get("name", "unknown")
-                    tool_args = tool_call.get("args", {})
-                    
-                    logger.info(f"Executing tool {i}/{len(response.tool_calls)}: {tool_name}")
-                    
-                    # Log the tool arguments for transparency
-                    if tool_args:
-                        args_str = ", ".join([f"{k}={v}" for k, v in tool_args.items()])
-                        logger.debug(f"Tool arguments: {args_str}")
-                    
-                    try:
-                        # Find the tool by name
-                        tool = next((t for t in selected_tools if t.name == tool_name), None)
-                        if not tool:
-                            logger.warning(f"Tool {tool_name} not found in selected tools")
-                            continue
-                        
-                        # Execute the tool
-                        if hasattr(tool, 'ainvoke'):
-                            result = await tool.ainvoke(tool_args)
-                        elif hasattr(tool, 'invoke'):
-                            result = tool.invoke(tool_args)
-                        else:
-                            result = await tool(tool_args) if asyncio.iscoroutinefunction(tool) else tool(tool_args)
-                        
-                        # Log the actual tool response for debugging
-                        if result:
-                            result_preview = str(result)[:500] + "..." if len(str(result)) > 500 else str(result)
-                            logger.debug(f"Tool {tool_name} response preview: {result_preview}")
-                            
-                            # Process the result
-                            formatted_results = self._process_tool_result(tool_name, result)
-                            research_results.extend(formatted_results)
-                            logger.info(f"Tool {tool_name} returned {len(formatted_results)} formatted results")
-                            
-                            # Log details of each formatted result
-                            for j, formatted_result in enumerate(formatted_results):
-                                title = formatted_result.get("title", "No title")
-                                content_preview = formatted_result.get("body", "")[:200] + "..." if len(formatted_result.get("body", "")) > 200 else formatted_result.get("body", "")
-                                logger.debug(f"Result {j+1}: '{title}' - Content: {content_preview}")
-                        else:
-                            logger.warning(f"Tool {tool_name} returned empty result")
-                            
-                    except Exception as e:
-                        logger.error(f"Error executing tool {tool_name}: {e}")
-                        continue
-                        
-            # Also include the LLM's own analysis/response as a result
-            if hasattr(response, 'content') and response.content:
-                llm_analysis = {
-                    "title": f"LLM Analysis: {query}",
-                    "href": "mcp://llm_analysis",
-                    "body": response.content
+
+            async def _provider_call(selected_model: str, selected_provider: str = "") -> List[Dict[str, str]]:
+                effective_provider = normalize_app_provider(selected_provider or self.cfg.strategic_llm_provider or "")
+                provider_kwargs = {
+                    'model': selected_model,
+                    **self.cfg.llm_kwargs
                 }
-                research_results.append(llm_analysis)
-                
-                # Log LLM analysis content
-                analysis_preview = response.content[:300] + "..." if len(response.content) > 300 else response.content
-                logger.debug(f"LLM Analysis: {analysis_preview}")
-                logger.info("Added LLM analysis to results")
-            
-            logger.info(f"Research completed with {len(research_results)} total results")
-            return research_results
+
+                llm_provider = GenericLLMProvider.from_provider(
+                    effective_provider,
+                    **provider_kwargs
+                )
+                llm_with_tools = llm_provider.llm.bind_tools(selected_tools)
+
+                logger.info("LLM researching with bound tools...")
+                response = await llm_with_tools.ainvoke(messages)
+                research_results = []
+
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    logger.info(f"LLM made {len(response.tool_calls)} tool calls")
+                    for i, tool_call in enumerate(response.tool_calls, 1):
+                        tool_name = tool_call.get("name", "unknown")
+                        tool_args = tool_call.get("args", {})
+
+                        logger.info(f"Executing tool {i}/{len(response.tool_calls)}: {tool_name}")
+                        if tool_args:
+                            args_str = ", ".join([f"{k}={v}" for k, v in tool_args.items()])
+                            logger.debug(f"Tool arguments: {args_str}")
+
+                        try:
+                            tool = next((t for t in selected_tools if t.name == tool_name), None)
+                            if not tool:
+                                logger.warning(f"Tool {tool_name} not found in selected tools")
+                                continue
+
+                            if hasattr(tool, 'ainvoke'):
+                                result = await tool.ainvoke(tool_args)
+                            elif hasattr(tool, 'invoke'):
+                                result = tool.invoke(tool_args)
+                            else:
+                                result = await tool(tool_args) if asyncio.iscoroutinefunction(tool) else tool(tool_args)
+
+                            if result:
+                                result_preview = str(result)[:500] + "..." if len(str(result)) > 500 else str(result)
+                                logger.debug(f"Tool {tool_name} response preview: {result_preview}")
+
+                                formatted_results = self._process_tool_result(tool_name, result)
+                                research_results.extend(formatted_results)
+                                logger.info(f"Tool {tool_name} returned {len(formatted_results)} formatted results")
+
+                                for j, formatted_result in enumerate(formatted_results):
+                                    title = formatted_result.get("title", "No title")
+                                    content_preview = formatted_result.get("body", "")[:200] + "..." if len(formatted_result.get("body", "")) > 200 else formatted_result.get("body", "")
+                                    logger.debug(f"Result {j+1}: '{title}' - Content: {content_preview}")
+                            else:
+                                logger.warning(f"Tool {tool_name} returned empty result")
+
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool_name}: {e}")
+                            continue
+
+                if hasattr(response, 'content') and response.content:
+                    llm_analysis = {
+                        "title": f"LLM Analysis: {query}",
+                        "href": "mcp://llm_analysis",
+                        "body": response.content
+                    }
+                    research_results.append(llm_analysis)
+
+                    analysis_preview = response.content[:300] + "..." if len(response.content) > 300 else response.content
+                    logger.debug(f"LLM Analysis: {analysis_preview}")
+                    logger.info("Added LLM analysis to results")
+
+                logger.info(f"Research completed with {len(research_results)} total results")
+                return research_results
+
+            scope = current_route_scope()
+            route_request = None
+            if scope is not None:
+                route_request = scope.build_request(
+                    task=query,
+                    system_prompt="MCP research with bound tools.",
+                    requested_model=self.cfg.strategic_llm_model,
+                    llm_provider=self.cfg.strategic_llm_provider,
+                    metadata={"tool_count": len(selected_tools)},
+                )
+            return await get_global_invoker().invoke(
+                provider_call=_provider_call,
+                requested_model=self.cfg.strategic_llm_model,
+                llm_provider=self.cfg.strategic_llm_provider,
+                route_request=route_request,
+                metadata={"task": query, "tool_count": len(selected_tools)},
+            )
             
         except Exception as e:
             logger.error(f"Error in LLM research with tools: {e}")

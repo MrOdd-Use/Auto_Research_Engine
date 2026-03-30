@@ -52,3 +52,12 @@ server_log.txt
 .cursorrules
 CURSOR_RULES.md
 /.history
+
+# Runtime outputs
+outputs/
+research/route_agent_test/*.log
+research/route_agent_test/*.jsonl
+research/route_agent_test/*.json
+research/route_agent_test/run_*/
+research/route_agent_test/initial_draft.md
+research/route_agent_test/final_draft.md

@@ -1,5 +1,6 @@
 from gpt_researcher import GPTResearcher
 from colorama import Fore, Style
+from multi_agents.route_agent import build_route_scope, route_scope
 from .utils.views import print_agent_output
 from .scrap import ScrapAgent
 
@@ -16,10 +17,18 @@ class ResearchAgent:
         # Initialize the researcher
         researcher = GPTResearcher(query=query, report_type=research_report, parent_query=parent_query,
                                    verbose=verbose, report_source=source, tone=tone, websocket=self.websocket, headers=self.headers)
-        # Conduct research on the given query
-        await researcher.conduct_research()
-        # Write the report
-        report = await researcher.write_report()
+        scope = build_route_scope(
+            application_name="auto_research_engine",
+            shared_agent_class="research_agent",
+            agent_role="researcher" if research_report == "subtopic_report" else "browser",
+            stage_name="section_research" if research_report == "subtopic_report" else "initial_research",
+            task=query,
+        )
+        with route_scope(scope):
+            # Conduct research on the given query
+            await researcher.conduct_research()
+            # Write the report
+            report = await researcher.write_report()
 
         return report
 

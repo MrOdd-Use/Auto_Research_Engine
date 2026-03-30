@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from .utils.views import print_agent_output
 from .utils.llms import call_model
+from multi_agents.route_agent import build_route_context
 
 TEMPLATE = """You are an expert research article reviewer. \
 Your goal is to review research drafts and provide feedback to the reviser based on guidelines and factual accuracy. \
@@ -121,7 +122,17 @@ Guidelines: {guidelines}\nDraft: {current_draft}\n
             {"role": "user", "content": review_prompt},
         ]
 
-        response = await call_model(prompt, model=task.get("model"))
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="review_agent",
+            agent_role="reviewer",
+            stage_name="final_review",
+            system_prompt=TEMPLATE,
+            task=str(task.get("query") or ""),
+            state=draft_state,
+            task_payload=task,
+        )
+        response = await call_model(prompt, model=task.get("model"), route_context=route_context)
 
         if task.get("verbose"):
             if self.websocket and self.stream_output:
