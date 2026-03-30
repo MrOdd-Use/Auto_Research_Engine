@@ -1,0 +1,226 @@
+{
+  "ready": true,
+  "route_agent": {
+    "backend": "external",
+    "project_path": "D:\\desk\\agent\\Route_Agent",
+    "app_env_path": "D:\\desk\\agent\\Auto_Research_Engine\\.env",
+    "status": "ok",
+    "message": "external Route_Agent global pool loaded with 10 available models",
+    "available_model_count": 10
+  },
+  "llms": [
+    {
+      "entry": "deepseek:deepseek-chat",
+      "provider": "deepseek",
+      "model": "deepseek-chat",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "present_envs": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_openai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "deepseek:deepseek-reasoner",
+      "provider": "deepseek",
+      "model": "deepseek-reasoner",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "present_envs": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_openai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.0-flash",
+      "provider": "google_genai",
+      "model": "gemini-2.0-flash",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.0-flash-001",
+      "provider": "google_genai",
+      "model": "gemini-2.0-flash-001",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.0-flash-lite",
+      "provider": "google_genai",
+      "model": "gemini-2.0-flash-lite",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.0-flash-lite-001",
+      "provider": "google_genai",
+      "model": "gemini-2.0-flash-lite-001",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.5-flash",
+      "provider": "google_genai",
+      "model": "gemini-2.5-flash",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.5-flash-preview-tts",
+      "provider": "google_genai",
+      "model": "gemini-2.5-flash-preview-tts",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.5-pro",
+      "provider": "google_genai",
+      "model": "gemini-2.5-pro",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    },
+    {
+      "entry": "google_genai:gemini-2.5-pro-preview-tts",
+      "provider": "google_genai",
+      "model": "gemini-2.5-pro-preview-tts",
+      "status": "ok",
+      "message": "available via route_agent_global_pool",
+      "source": "route_agent_global_pool",
+      "required_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "present_envs": [
+        "GOOGLE_API_KEY"
+      ],
+      "required_packages": [
+        "langchain_google_genai"
+      ],
+      "missing_packages": []
+    }
+  ],
+  "retrievers": [
+    {
+      "retriever": "tavily",
+      "status": "ok",
+      "message": "configured"
+    },
+    {
+      "retriever": "mcp",
+      "status": "warning",
+      "message": "MCP retriever is enabled but no MCP_SERVERS config is present",
+      "has_mcp_adapters": true
+    }
+  ],
+  "embedding": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "status": "ok",
+    "message": "Ollama endpoint is reachable",
+    "base_url": "http://localhost:11434"
+  },
+  "filesystem": {
+    "path": "doc\\route_agent_test",
+    "status": "ok",
+    "message": "output directory is writable"
+  },
+  "issues": [
+    {
+      "retriever": "mcp",
+      "status": "warning",
+      "message": "MCP retriever is enabled but no MCP_SERVERS config is present",
+      "has_mcp_adapters": true
+    }
+  ]
+}
