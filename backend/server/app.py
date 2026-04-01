@@ -64,8 +64,25 @@ class ChatRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs("outputs", exist_ok=True)
-    logger.info("Auto_Research_Engine API ready - local mode (no database persistence)")
+
+    federation_client = None
+    if os.getenv("ROUTE_AGENT_BACKEND") == "federation":
+        try:
+            from multi_agents.route_agent import RouteAgentClient, RoutedLLMInvoker, set_global_invoker
+            client = RouteAgentClient(backend="federation")
+            await client.astart()
+            set_global_invoker(RoutedLLMInvoker(client))
+            federation_client = client
+            logger.info("Federation routing initialized (app_id=%s)", client.application_name)
+        except Exception:
+            logger.exception("Federation routing init failed, falling back to default")
+
+    mode = "federation" if federation_client else "local"
+    logger.info("Auto_Research_Engine API ready - %s mode", mode)
     yield
+    if federation_client is not None:
+        await federation_client.astop()
+        logger.info("Federation routing stopped")
     logger.info("Research API shutting down")
 
 app = FastAPI(lifespan=lifespan)

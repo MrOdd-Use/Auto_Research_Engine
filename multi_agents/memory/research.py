@@ -31,5 +31,6 @@ class ResearchState(TypedDict):
     claim_reflexion_iterations: int
     source_index: Optional[dict]
     indexed_research_data: Optional[str]
+    model_decisions: Optional[list]
     # Review diff tracking
     _draft_before_revision: Optional[str]

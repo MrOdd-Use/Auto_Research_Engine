@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from dotenv import dotenv_values
 
@@ -11,6 +11,9 @@ from .tools.external_bridge import ExternalRouteAgentBridge
 from .utils.model_utils import build_model_identifier, split_model_identifier
 from .models import RouteDecision, RouteRequest
 from .storage.store import LayeredRoutingStore
+
+if TYPE_CHECKING:
+    from .federation_adapter import FederationAdapter
 
 
 class RouteAgentClient:
@@ -86,6 +89,9 @@ class RouteAgentClient:
         backend: str | None = None,
         external_project_path: str | None = None,
         app_env_path: str | None = None,
+        federation_url: str | None = None,
+        federation_local_db: str | None = None,
+        federation_router_db: str | None = None,
     ) -> None:
         self.store = store or LayeredRoutingStore()
         self.application_name = application_name
@@ -98,6 +104,15 @@ class RouteAgentClient:
             if self.backend == "external"
             else None
         )
+        self._federation: "FederationAdapter | None" = None
+        if self.backend == "federation":
+            from .federation_adapter import FederationAdapter
+            self._federation = FederationAdapter(
+                app_id=application_name,
+                server_url=federation_url,
+                local_db_path=federation_local_db,
+                router_db_path=federation_router_db,
+            )
         self.model_pool = self._resolve_model_pool(model_pool)
 
     @property
@@ -105,8 +120,26 @@ class RouteAgentClient:
         return self.backend == "external"
 
     @property
+    def is_federation(self) -> bool:
+        return self._federation is not None
+
+    @property
+    def federation(self) -> "FederationAdapter | None":
+        return self._federation
+
+    @property
     def external_error(self) -> str:
         return self._external_error
+
+    async def astart(self) -> None:
+        """Start async resources (federation background sync)."""
+        if self._federation is not None:
+            await self._federation.start()
+
+    async def astop(self) -> None:
+        """Stop async resources (federation cleanup)."""
+        if self._federation is not None:
+            await self._federation.stop()
 
     def route(self, request: RouteRequest) -> RouteDecision:
         if self._external_bridge is not None:

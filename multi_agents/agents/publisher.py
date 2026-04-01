@@ -2,6 +2,11 @@ from .utils.file_formats import \
     write_md_to_pdf, \
     write_md_to_word, \
     write_text_to_md
+from .utils.output_writers import (
+    collect_cited_ids_from_text,
+    write_annotated_report,
+    write_evidence_base,
+)
 
 from .utils.views import print_agent_output
 
@@ -17,7 +22,23 @@ class PublisherAgent:
         layout = self.generate_layout(research_state)
         await self.write_report_by_formats(layout, publish_formats)
 
+        # Write structured output files (evidence_base.md + report.md)
+        await self._write_structured_outputs(layout, research_state)
+
         return layout
+
+    async def _write_structured_outputs(self, layout: str, research_state: dict) -> None:
+        """Write evidence_base.md and report.md alongside the standard report."""
+        source_index = research_state.get("source_index") or {}
+        claim_report = research_state.get("claim_confidence_report") or []
+
+        # Collect citation frequencies from the layout for evidence_base annotations
+        cited_ids = collect_cited_ids_from_text(layout) if source_index else None
+
+        await write_evidence_base(self.output_dir, source_index, cited_ids)
+        await write_annotated_report(
+            self.output_dir, layout, claim_report, source_index,
+        )
 
     def generate_layout(self, research_state: dict):
         final_draft = research_state.get("final_draft")

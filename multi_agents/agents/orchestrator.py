@@ -23,7 +23,9 @@ from . import \
     ReviserAgent
 from .claim_verifier import ClaimVerifierAgent
 
+from multi_agents.route_agent.invoker import get_global_invoker
 from multi_agents.workflow_session import WorkflowSessionRecorder
+from .utils.output_writers import write_model_decisions
 
 
 class ChiefEditorAgent:
@@ -925,6 +927,19 @@ class ChiefEditorAgent:
 
         await self._log_research_start()
 
+        # Collect route decisions via event_logger wrapper
+        decisions: List[Dict[str, Any]] = []
+        invoker = get_global_invoker()
+        original_logger = invoker.event_logger
+
+        def _collecting_logger(payload: Dict[str, Any]) -> None:
+            if payload.get("type") == "route_decision":
+                decisions.append(payload)
+            if original_logger is not None:
+                original_logger(payload)
+
+        invoker.event_logger = _collecting_logger
+
         base_state = initial_state or {"task": copy.deepcopy(self.task)}
         try:
             result = await self._execute_workflow(
@@ -942,8 +957,15 @@ class ChiefEditorAgent:
                     final_state=result,
                     answer=str(result.get("report") or ""),
                 )
+            # Write model decisions log
+            await write_model_decisions(self.output_dir, decisions)
             return result
         except Exception as exc:
             if session_recorder is not None:
                 await session_recorder.mark_failed(str(exc))
+            # Write partial decisions even on failure
+            if decisions:
+                await write_model_decisions(self.output_dir, decisions)
             raise
+        finally:
+            invoker.event_logger = original_logger

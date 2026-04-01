@@ -43,6 +43,12 @@ class RoutedLLMInvoker:
         if request is None:
             return await provider_call(requested_model)
 
+        if self.client.is_federation and self.client.federation is not None:
+            return await self._invoke_federation(
+                request=request,
+                provider_call=provider_call,
+            )
+
         decision = self.client.route(request)
         selected_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
         self._emit(
@@ -146,6 +152,79 @@ class RoutedLLMInvoker:
                 "trace_context": decision.trace_context,
             }
         )
+        return result
+
+    async def _invoke_federation(
+        self,
+        *,
+        request: RouteRequest,
+        provider_call: ProviderCall,
+    ) -> Any:
+        """Federation path: route → invoke → release + report_outcome."""
+        federation = self.client.federation
+        assert federation is not None
+
+        decision, lease_id = await federation.route(request)
+        selected_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
+        self._emit({
+            "type": "route_decision",
+            "backend": "federation",
+            "application_name": request.application_name,
+            "shared_agent_class": decision.resolved_shared_agent_class,
+            "selected_model": decision.selected_model,
+            "selected_provider": decision.selected_provider,
+            "selected_model_id": selected_model_id,
+            "routing_reason": decision.routing_reason,
+            "lease_id": lease_id,
+            "trace_context": decision.trace_context,
+        })
+
+        started_at = time.perf_counter()
+        try:
+            result = await self._invoke_provider(
+                provider_call=provider_call,
+                decision=decision,
+            )
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
+            if lease_id:
+                await federation.release(lease_id)
+                await federation.report_outcome(
+                    lease_id=lease_id,
+                    model_id=decision.selected_model,
+                    agent_class=decision.resolved_shared_agent_class,
+                    outcome_type="failure",
+                    duration_ms=int(duration_ms),
+                )
+            self._emit({
+                "type": "execution_end",
+                "backend": "federation",
+                "status": "failed",
+                "selected_model": decision.selected_model,
+                "lease_id": lease_id,
+                "execution_latency_ms": duration_ms,
+                "error": str(exc),
+            })
+            raise
+
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
+        if lease_id:
+            await federation.release(lease_id)
+            await federation.report_outcome(
+                lease_id=lease_id,
+                model_id=decision.selected_model,
+                agent_class=decision.resolved_shared_agent_class,
+                outcome_type="success",
+                duration_ms=int(duration_ms),
+            )
+        self._emit({
+            "type": "execution_end",
+            "backend": "federation",
+            "status": "completed",
+            "selected_model": decision.selected_model,
+            "lease_id": lease_id,
+            "execution_latency_ms": duration_ms,
+        })
         return result
 
     async def _invoke_provider(self, *, provider_call: ProviderCall, decision: RouteDecision) -> Any:

@@ -506,6 +506,35 @@ Return ONLY the JSON, no markdown fences.""",
 
         return table
 
+    # ── Annotated Report (academic-style) ────────────────────────────
+
+    def build_annotated_report_text(self, draft: str, claim_report: List[dict]) -> str:
+        """Build report text with [HIGH]/[MEDIUM]/... tags, preserving [S*] citations.
+
+        Unlike annotate_draft() which strips citations for end-user display,
+        this method keeps [S*] references intact for academic-style output.
+        """
+        if not draft or not claim_report:
+            return draft or ""
+
+        result = draft
+        # Map original_sentence -> confidence (first-write wins)
+        sentence_map: Dict[str, str] = {}
+        for claim in claim_report:
+            sentence = str(claim.get("original_sentence") or "").strip()
+            confidence = str(claim.get("confidence") or "").strip()
+            if sentence and confidence and sentence not in sentence_map:
+                sentence_map[sentence] = confidence
+
+        # Apply longer matches first to avoid partial overlaps
+        for sentence, confidence in sorted(
+            sentence_map.items(), key=lambda x: -len(x[0])
+        ):
+            tagged = f"[{confidence}] {sentence}"
+            result = result.replace(sentence, tagged, 1)
+
+        return result
+
     # ── Main Entry ───────────────────────────────────────────────────────
 
     async def run(self, research_state: dict) -> dict:
