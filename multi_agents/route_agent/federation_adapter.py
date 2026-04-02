@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+import httpx
+
 from .models import RouteDecision, RouteRequest
 from .utils.model_utils import split_model_identifier
 
@@ -56,7 +58,7 @@ class FederationAdapter:
         from route_agent.federation.client.route_client import RouteClient
 
         self._app_id = app_id
-        _server_url = server_url or os.getenv("ROUTE_AGENT_FEDERATION_URL", "")
+        self._server_url = server_url or os.getenv("ROUTE_AGENT_FEDERATION_URL", "")
         _local_db = local_db_path or os.getenv(
             "ROUTE_AGENT_FEDERATION_LOCAL_DB", "data/federation_local.db"
         )
@@ -65,7 +67,7 @@ class FederationAdapter:
         )
         self._client = RouteClient(
             app_id=app_id,
-            server_url=_server_url,
+            server_url=self._server_url,
             local_db_path=_local_db,
             router_db_path=_router_db,
         )
@@ -78,7 +80,35 @@ class FederationAdapter:
     async def start(self) -> None:
         if not self._started:
             await self._client.start()
+            await self._register_agents()
             self._started = True
+
+    async def _register_agents(self) -> None:
+        """Register declared agents with the central federation server."""
+        agents = [
+            {"agent_name": name, "agent_class": cls, "agent_version": "v1"}
+            for name, cls in DECLARED_AGENTS.items()
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as http:
+                response = await http.post(
+                    f"{self._server_url}/api/v1/apps/register",
+                    json={
+                        "app_id": self._app_id,
+                        "app_name": self._app_id,
+                        "agents": agents,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                logger.info(
+                    "Registered %d declared agents with federation | app_id=%s pool_versions=%s",
+                    len(agents),
+                    self._app_id,
+                    data.get("pool_versions", {}),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Agent registration failed (non-fatal): %s", exc)
 
     async def stop(self) -> None:
         if self._started:

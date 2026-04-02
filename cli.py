@@ -78,42 +78,58 @@ async def main(query: str, tone: str, no_pdf: bool, no_docx: bool):
         "pessimistic": Tone.Pessimistic,
     }
 
-    result = await run_research_task(
-        query=query,
-        websocket=None,
-        stream_output=None,
-        tone=tone_map[tone],
-        headers=None,
-    )
-
-    if isinstance(result, dict):
-        report = str(result.get("report", ""))
-    else:
-        report = str(result)
-
-    task_id = str(uuid4())
-    os.makedirs("outputs", exist_ok=True)
-
-    md_path = f"outputs/{task_id}.md"
-    with open(md_path, "w", encoding="utf-8") as handle:
-        handle.write(report)
-    print(f"Report written to '{md_path}'")
-
-    if not no_pdf:
+    federation_client = None
+    if os.getenv("ROUTE_AGENT_BACKEND") == "federation":
         try:
-            pdf_path = await write_md_to_pdf(report, task_id)
-            if pdf_path:
-                print(f"PDF written to '{pdf_path}'")
+            from multi_agents.route_agent import RouteAgentClient, RoutedLLMInvoker, set_global_invoker
+            client = RouteAgentClient(backend="federation")
+            await client.astart()
+            set_global_invoker(RoutedLLMInvoker(client))
+            federation_client = client
+            print(f"Federation routing initialized (app_id={client.application_name})")
         except Exception as exc:
-            print(f"Warning: PDF generation failed: {exc}")
+            print(f"Warning: Federation routing init failed: {exc}")
 
-    if not no_docx:
-        try:
-            docx_path = await write_md_to_word(report, task_id)
-            if docx_path:
-                print(f"DOCX written to '{docx_path}'")
-        except Exception as exc:
-            print(f"Warning: DOCX generation failed: {exc}")
+    try:
+        result = await run_research_task(
+            query=query,
+            websocket=None,
+            stream_output=None,
+            tone=tone_map[tone],
+            headers=None,
+        )
+
+        if isinstance(result, dict):
+            report = str(result.get("report", ""))
+        else:
+            report = str(result)
+
+        task_id = str(uuid4())
+        os.makedirs("outputs", exist_ok=True)
+
+        md_path = f"outputs/{task_id}.md"
+        with open(md_path, "w", encoding="utf-8") as handle:
+            handle.write(report)
+        print(f"Report written to '{md_path}'")
+
+        if not no_pdf:
+            try:
+                pdf_path = await write_md_to_pdf(report, task_id)
+                if pdf_path:
+                    print(f"PDF written to '{pdf_path}'")
+            except Exception as exc:
+                print(f"Warning: PDF generation failed: {exc}")
+
+        if not no_docx:
+            try:
+                docx_path = await write_md_to_word(report, task_id)
+                if docx_path:
+                    print(f"DOCX written to '{docx_path}'")
+            except Exception as exc:
+                print(f"Warning: DOCX generation failed: {exc}")
+    finally:
+        if federation_client is not None:
+            await federation_client.astop()
 
 
 if __name__ == "__main__":

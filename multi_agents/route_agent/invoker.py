@@ -193,7 +193,7 @@ class RoutedLLMInvoker:
                     lease_id=lease_id,
                     model_id=decision.selected_model,
                     agent_class=decision.resolved_shared_agent_class,
-                    outcome_type="failure",
+                    outcome_type="exec_fail",
                     duration_ms=int(duration_ms),
                 )
             self._emit({
@@ -214,7 +214,7 @@ class RoutedLLMInvoker:
                 lease_id=lease_id,
                 model_id=decision.selected_model,
                 agent_class=decision.resolved_shared_agent_class,
-                outcome_type="success",
+                outcome_type="exec_success",
                 duration_ms=int(duration_ms),
             )
         self._emit({
