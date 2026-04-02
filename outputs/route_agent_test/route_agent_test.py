@@ -51,7 +51,7 @@ from multi_agents.route_agent import RoutedLLMInvoker, set_global_invoker
 # 输出目录：每次运行创建带时间戳的子文件夹
 # ---------------------------------------------------------------------------
 _RUN_TS  = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-OUT_DIR  = _PROJECT_ROOT / "outputs" / _RUN_TS
+OUT_DIR  = _PROJECT_ROOT / "outputs" / "route_agent_test" / _RUN_TS
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ROUTE_LOG    = OUT_DIR / "route_decisions.log"
