@@ -39,7 +39,7 @@ PROVIDER_PACKAGE_MAP = {
 def run_live_preflight(
     *,
     env_path: str | Path = ".env",
-    output_path: str | Path = "research/route_agent_test/live_preflight.json",
+    output_path: str | Path = "outputs/route_agent_test/live_preflight.json",
 ) -> Dict[str, Any]:
     load_dotenv(dotenv_path=env_path, override=False)
     cfg = Config()

@@ -31,7 +31,7 @@ class ReferenceRouteAgentScenario:
     def __init__(
         self,
         *,
-        output_dir: str | Path = "research/route_agent_test",
+        output_dir: str | Path = "outputs/route_agent_test",
         seed: int = 20260329,
         client: RouteAgentClient | None = None,
     ) -> None:
@@ -458,7 +458,7 @@ class ReferenceRouteAgentScenario:
 
 async def run_reference_application(
     *,
-    output_dir: str | Path = "research/route_agent_test",
+    output_dir: str | Path = "outputs/route_agent_test",
     seed: int = 20260329,
 ) -> ScenarioArtifacts:
     scenario = ReferenceRouteAgentScenario(output_dir=output_dir, seed=seed)

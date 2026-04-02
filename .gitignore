@@ -13,8 +13,6 @@ ENV/
 env.bak/
 venv.bak/
 
-#Ignore generated outputs
-outputs/
 *.lock
 dist/
 gpt_researcher.egg-info/
@@ -54,12 +52,11 @@ CURSOR_RULES.md
 /.history
 
 # Runtime outputs
-outputs/
 multi_agents/agent_state.json
 .claude/settings.local.json
-research/route_agent_test/*.log
-research/route_agent_test/*.jsonl
-research/route_agent_test/*.json
-research/route_agent_test/run_*/
-research/route_agent_test/initial_draft.md
-research/route_agent_test/final_draft.md
+outputs/route_agent_test/*.log
+outputs/route_agent_test/*.jsonl
+outputs/route_agent_test/*.json
+outputs/route_agent_test/run_*/
+outputs/route_agent_test/initial_draft.md
+outputs/route_agent_test/final_draft.md

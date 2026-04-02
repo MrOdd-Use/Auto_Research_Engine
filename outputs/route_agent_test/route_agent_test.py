@@ -8,7 +8,7 @@ Query: AI对就业市场的影响
   Phase 3  对最终报告注入整体逻辑质疑，触发 reviewer → reviser 链
   Phase 4  publisher 输出最终报告
 
-输出文件（均在 research/route_agent_test/）：
+输出文件（均在 outputs/route_agent_test/）：
   report_v1_before_scrap_rerun.md                    初稿（scrap 回溯前）
   report_v2_after_scrap_rerun_{section}.md           scrap 回溯后（含被质疑的 section 标题）
   report_v3_before_logic_challenge.md                整体逻辑质疑前
@@ -33,9 +33,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
-# 路径设置：从 research/route_agent_test/ 运行时，需要把项目根加入 sys.path
+# 路径设置：从 outputs/route_agent_test/ 运行时，需要把项目根加入 sys.path
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR = Path(__file__).resolve().parent          # research/route_agent_test/
+_SCRIPT_DIR = Path(__file__).resolve().parent          # outputs/route_agent_test/
 _PROJECT_ROOT = _SCRIPT_DIR.parent.parent              # Auto_Research_Engine/
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -51,7 +51,7 @@ from multi_agents.route_agent import RoutedLLMInvoker, set_global_invoker
 # 输出目录：每次运行创建带时间戳的子文件夹
 # ---------------------------------------------------------------------------
 _RUN_TS  = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-OUT_DIR  = _SCRIPT_DIR.parent / _RUN_TS
+OUT_DIR  = _PROJECT_ROOT / "outputs" / _RUN_TS
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ROUTE_LOG    = OUT_DIR / "route_decisions.log"
