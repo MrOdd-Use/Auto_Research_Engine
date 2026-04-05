@@ -36,7 +36,7 @@ class RouteRequest:
     stage_name: str = ""
     system_prompt: str = ""
     task: str = ""
-    requested_model: str = ""
+    requested_model: str | None = None
     llm_provider: str = ""
     execution_context: RouteExecutionContext = field(default_factory=RouteExecutionContext)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -70,6 +70,7 @@ class RouteDecision:
     registry_latency_ms: float = 0.0
     score_breakdown: Dict[str, Dict[str, float]] = field(default_factory=dict)
     trace_context: Dict[str, Any] = field(default_factory=dict)
+    runtime_context: Any | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -104,7 +105,7 @@ class RouteScope:
         *,
         task: str = "",
         system_prompt: str = "",
-        requested_model: str = "",
+        requested_model: str | None = None,
         llm_provider: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> RouteRequest:

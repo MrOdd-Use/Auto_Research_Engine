@@ -1,9 +1,12 @@
+from typing import Any
+
 import json_repair
 from langchain_community.adapters.openai import convert_openai_messages
 from langchain_core.utils.json import parse_json_markdown
 from loguru import logger
 
 from gpt_researcher.config.config import Config
+from gpt_researcher.llm_provider.generic.base import normalize_response_text
 from gpt_researcher.utils.llm import create_chat_completion
 from multi_agents.route_agent import RouteExecutionContext, RouteRequest
 
@@ -35,14 +38,21 @@ async def call_model(
             # cost_callback=cost_callback,
         )
 
-        if response_format == "json":
-            return parse_json_markdown(response, parser=json_repair.loads)
+        response_text = _normalize_model_response(response)
 
-        return response
+        if response_format == "json":
+            return parse_json_markdown(response_text, parser=json_repair.loads)
+
+        return response_text
 
     except Exception as e:
         logger.error(f"Error in calling model: {e}")
         raise
+
+
+def _normalize_model_response(response: Any) -> str:
+    """Convert one model response payload into a plain-text string."""
+    return normalize_response_text(response)
 
 
 def _extract_prompt_content(prompt: list, role: str) -> str:
@@ -82,7 +92,7 @@ def _build_route_request(
         stage_name=str(route_context.get("stage_name") or ""),
         system_prompt=str(route_context.get("system_prompt") or _extract_prompt_content(prompt, "system")),
         task=str(route_context.get("task") or _extract_prompt_content(prompt, "user")),
-        requested_model=str(route_context.get("preferred_model") or ""),
+        requested_model=None,
         llm_provider=llm_provider,
         execution_context=execution_context,
         metadata={

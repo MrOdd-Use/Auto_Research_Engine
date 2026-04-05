@@ -202,15 +202,15 @@ class Config:
     @staticmethod
     def parse_llm(llm_str: str | None) -> tuple[str | None, str | None]:
         """Parse llm string into (llm_provider, llm_model)."""
-        from gpt_researcher.llm_provider.generic.base import _SUPPORTED_PROVIDERS
+        from gpt_researcher.llm_provider.generic.base import _SUPPORTED_PROVIDERS, is_supported_provider
 
         if llm_str is None:
             return None, None
         try:
             llm_provider, llm_model = llm_str.split(":", 1)
-            assert llm_provider in _SUPPORTED_PROVIDERS, (
+            assert is_supported_provider(llm_provider), (
                 f"Unsupported {llm_provider}.\nSupported llm providers are: "
-                + ", ".join(_SUPPORTED_PROVIDERS)
+                + ", ".join(sorted(_SUPPORTED_PROVIDERS | {"relay_*"}))
             )
             return llm_provider, llm_model
         except ValueError:

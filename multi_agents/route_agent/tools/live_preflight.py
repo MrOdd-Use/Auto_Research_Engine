@@ -15,44 +15,77 @@ from gpt_researcher.mcp import HAS_MCP_ADAPTERS
 
 from ..client import RouteAgentClient
 from ..utils.model_utils import normalize_app_provider
+from .live_probe import _provider_env_groups, _provider_package_names
 
 
-PROVIDER_ENV_MAP = {
-    "openai": ["OPENAI_API_KEY"],
-    "deepseek": ["DEEPSEEK_API_KEY"],
-    "anthropic": ["ANTHROPIC_API_KEY"],
-    "google_genai": ["GOOGLE_API_KEY"],
-    "xai": ["XAI_API_KEY"],
-    "ollama": ["OLLAMA_BASE_URL", "OLLAMA_HOST"],
-}
+def _required_env_descriptions(provider: str) -> List[str]:
+    """Return human-readable env requirements for one provider."""
+    return [" or ".join(group) for group in _provider_env_groups(provider)]
 
-PROVIDER_PACKAGE_MAP = {
-    "openai": ["langchain_openai"],
-    "deepseek": ["langchain_openai"],
-    "anthropic": ["langchain_anthropic"],
-    "google_genai": ["langchain_google_genai"],
-    "ollama": ["langchain_community", "langchain_ollama"],
-    "xai": ["langchain_xai"],
-}
+
+def _present_env_names(provider: str) -> List[str]:
+    """Return the concrete env vars currently satisfying the provider requirements."""
+    present: List[str] = []
+    for group in _provider_env_groups(provider):
+        match = next((name for name in group if str(os.getenv(name) or "").strip()), None)
+        if match:
+            present.append(match)
+    return present
+
+
+def _provider_env_ready(provider: str) -> bool:
+    """Return whether the provider has all required env groups satisfied."""
+    groups = _provider_env_groups(provider)
+    if not groups:
+        return True
+    return all(any(str(os.getenv(name) or "").strip() for name in group) for group in groups)
+
+
+class _FallbackConfig:
+    """Minimal config fallback when optional retriever imports are unavailable."""
+
+    def __init__(self) -> None:
+        self.retrievers = _parse_retriever_env(str(os.getenv("RETRIEVER") or "tavily"))
+        self.embedding_provider, self.embedding_model = _parse_embedding_env(
+            str(os.getenv("EMBEDDING") or "")
+        )
 
 
 def run_live_preflight(
     *,
     env_path: str | Path = ".env",
     output_path: str | Path = "outputs/route_agent_test/live_preflight.json",
+    include_live_model_probe: bool = False,
+    live_probe_limit: int | None = None,
 ) -> Dict[str, Any]:
     load_dotenv(dotenv_path=env_path, override=False)
-    cfg = Config()
+    cfg, config_checks = _build_config()
     client = RouteAgentClient()
 
-    route_agent_check = _collect_route_agent_check(client)
-    llm_checks = _collect_llm_checks(client)
+    live_probe_results: List[Dict[str, Any]] = []
+    bridge = getattr(client, "external_bridge", None)
+    if include_live_model_probe and bridge is not None:
+        live_probe_results = bridge.probe_global_pool(
+            force=False,
+            limit=live_probe_limit,
+            mark_unavailable=True,
+        )
+
+    route_agent_check = _collect_route_agent_check(client, live_probe_results=live_probe_results)
+    llm_checks = _collect_llm_checks(client, live_probe_results=live_probe_results)
     retriever_checks = _collect_retriever_checks(cfg)
     embedding_check = _collect_embedding_check(cfg)
     filesystem_check = _collect_filesystem_check(output_path)
 
     issues = []
-    for bucket in ([route_agent_check], llm_checks, retriever_checks, [embedding_check], [filesystem_check]):
+    for bucket in (
+        [route_agent_check],
+        llm_checks,
+        retriever_checks,
+        [embedding_check],
+        [filesystem_check],
+        config_checks,
+    ):
         for item in bucket:
             if item.get("status") in {"warning", "error"}:
                 issues.append(item)
@@ -64,6 +97,7 @@ def run_live_preflight(
         "retrievers": retriever_checks,
         "embedding": embedding_check,
         "filesystem": filesystem_check,
+        "config": config_checks,
         "issues": issues,
     }
 
@@ -73,7 +107,46 @@ def run_live_preflight(
     return summary
 
 
-def _collect_route_agent_check(client: RouteAgentClient) -> Dict[str, Any]:
+def _build_config() -> tuple[Any, List[Dict[str, Any]]]:
+    """Build the runtime Config, falling back when optional imports are absent."""
+    try:
+        return Config(), []
+    except ModuleNotFoundError as exc:
+        return (
+            _FallbackConfig(),
+            [
+                {
+                    "component": "config",
+                    "status": "warning",
+                    "message": (
+                        "Config fallback activated because an optional dependency "
+                        f"is missing: {exc.name}"
+                    ),
+                }
+            ],
+        )
+
+
+def _parse_retriever_env(raw: str) -> List[str]:
+    """Parse the RETRIEVER env into a clean retriever list."""
+    values = [item.strip() for item in str(raw or "").split(",") if item.strip()]
+    return values or ["tavily"]
+
+
+def _parse_embedding_env(raw: str) -> Tuple[str, str]:
+    """Parse the EMBEDDING env into provider/model strings."""
+    value = str(raw or "").strip()
+    if ":" not in value:
+        return "", ""
+    provider, model = value.split(":", 1)
+    return provider.strip(), model.strip()
+
+
+def _collect_route_agent_check(
+    client: RouteAgentClient,
+    *,
+    live_probe_results: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
     if client.is_external_backend:
         bridge = getattr(client, "_external_bridge", None)
         project_path = str(getattr(bridge, "project_path", ""))
@@ -97,7 +170,7 @@ def _collect_route_agent_check(client: RouteAgentClient) -> Dict[str, Any]:
                 "message": f"external Route_Agent inspection failed: {client.external_error}",
             }
 
-        return {
+        payload = {
             "backend": client.backend,
             "project_path": project_path,
             "app_env_path": app_env_path,
@@ -109,6 +182,23 @@ def _collect_route_agent_check(client: RouteAgentClient) -> Dict[str, Any]:
             ),
             "available_model_count": len(entries),
         }
+        if live_probe_results:
+            ok_count = sum(1 for item in live_probe_results if item.get("ok"))
+            skipped_count = sum(1 for item in live_probe_results if item.get("skipped"))
+            filtered_count = sum(
+                1 for item in live_probe_results if not item.get("ok") and not item.get("skipped")
+            )
+            payload["live_probe"] = {
+                "checked_models": len(live_probe_results),
+                "ok_count": ok_count,
+                "skipped_count": skipped_count,
+                "filtered_count": filtered_count,
+            }
+            payload["reachable_model_count"] = ok_count + skipped_count
+            if ok_count == 0 and skipped_count == 0:
+                payload["status"] = "error"
+                payload["message"] = "external Route_Agent live probe found no reachable models"
+        return payload
 
     return {
         "backend": client.backend,
@@ -118,8 +208,17 @@ def _collect_route_agent_check(client: RouteAgentClient) -> Dict[str, Any]:
     }
 
 
-def _collect_llm_checks(client: RouteAgentClient) -> List[Dict[str, Any]]:
+def _collect_llm_checks(
+    client: RouteAgentClient,
+    *,
+    live_probe_results: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
     entries = client.describe_model_pool()
+    live_probe_map = {
+        str(item.get("model_id") or ""): item
+        for item in (live_probe_results or [])
+        if str(item.get("model_id") or "").strip()
+    }
     if client.is_external_backend:
         if client.external_error:
             return [
@@ -151,7 +250,13 @@ def _collect_llm_checks(client: RouteAgentClient) -> List[Dict[str, Any]]:
                     "missing_packages": [],
                 }
             ]
-        return [_build_llm_check(entry, source="route_agent_global_pool") for entry in entries]
+        return [
+            _apply_live_probe_result(
+                _build_llm_check(entry, source="route_agent_global_pool"),
+                live_probe_map.get(str(entry.get("model_id") or "").strip()),
+            )
+            for entry in entries
+        ]
 
     if not entries:
         return [
@@ -168,16 +273,22 @@ def _collect_llm_checks(client: RouteAgentClient) -> List[Dict[str, Any]]:
                 "missing_packages": [],
             }
         ]
-    return [_build_llm_check(entry, source="local_config") for entry in entries]
+    return [
+        _apply_live_probe_result(
+            _build_llm_check(entry, source="local_config"),
+            live_probe_map.get(str(entry.get("model_id") or "").strip()),
+        )
+        for entry in entries
+    ]
 
 
 def _build_llm_check(entry: Dict[str, str], *, source: str) -> Dict[str, Any]:
     model_id = str(entry.get("model_id") or "").strip()
     provider = normalize_app_provider(entry.get("provider") or "")
     model = str(entry.get("model") or "").strip()
-    required_envs = PROVIDER_ENV_MAP.get(provider, [])
-    present_envs = [name for name in required_envs if str(os.getenv(name) or "").strip()]
-    required_packages = PROVIDER_PACKAGE_MAP.get(provider, [])
+    required_envs = _required_env_descriptions(provider)
+    present_envs = _present_env_names(provider)
+    required_packages = _provider_package_names(provider)
     missing_packages = [name for name in required_packages if importlib.util.find_spec(name) is None]
     status = "ok"
     message = f"available via {source}"
@@ -185,7 +296,7 @@ def _build_llm_check(entry: Dict[str, str], *, source: str) -> Dict[str, Any]:
     if not provider or not model:
         status = "error"
         message = "missing provider/model configuration"
-    elif required_envs and not present_envs:
+    elif required_envs and not _provider_env_ready(provider):
         status = "error"
         message = f"missing provider credentials: {', '.join(required_envs)}"
     elif missing_packages:
@@ -204,6 +315,24 @@ def _build_llm_check(entry: Dict[str, str], *, source: str) -> Dict[str, Any]:
         "required_packages": required_packages,
         "missing_packages": missing_packages,
     }
+
+
+def _apply_live_probe_result(check: Dict[str, Any], live_probe: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Merge one live-probe result into one LLM preflight check."""
+    if live_probe is None:
+        return check
+
+    result = dict(check)
+    status = "ok" if live_probe.get("ok") else "skipped" if live_probe.get("skipped") else "warning"
+    result["live_probe"] = {
+        "status": status,
+        "cached": bool(live_probe.get("cached")),
+        "message": str(live_probe.get("message") or ""),
+    }
+    if status == "warning" and result.get("status") == "ok":
+        result["status"] = "warning"
+        result["message"] = f"{result['message']}; live probe failed and the model was filtered"
+    return result
 
 
 def _collect_retriever_checks(cfg: Config) -> List[Dict[str, Any]]:

@@ -31,14 +31,14 @@ from .utils.output_writers import write_model_decisions
 class ChiefEditorAgent:
     """Agent responsible for managing and coordinating editing tasks."""
 
-    def __init__(self, task: dict, websocket=None, stream_output=None, tone=None, headers=None):
+    def __init__(self, task: dict, websocket=None, stream_output=None, tone=None, headers=None, output_dir=None):
         self.task = task
         self.websocket = websocket
         self.stream_output = stream_output
         self.headers = headers or {}
         self.tone = tone
         self.task_id = self._generate_task_id()
-        self.output_dir = self._create_output_directory()
+        self.output_dir = str(output_dir) if output_dir else self._create_output_directory()
         self._workflow_agents = {}
 
     def _generate_task_id(self):

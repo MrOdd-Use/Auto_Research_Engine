@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import Any, Dict, List
 
 import httpx
+
+from route_agent.federation.client.route_client import RouteClient
 
 from .models import RouteDecision, RouteRequest
 from .utils.model_utils import split_model_identifier
@@ -16,31 +16,20 @@ from .utils.model_utils import split_model_identifier
 logger = logging.getLogger(__name__)
 
 DECLARED_AGENTS: Dict[str, str] = {
-    "planner_agent": "summarization",
-    "research_agent": "general",
-    "scrape_agent": "scrape",
-    "check_data_agent": "review",
-    "writer_agent": "rewrite",
-    "review_agent": "review",
-    "reviser_agent": "rewrite",
-    "claim_verifier_agent": "review",
-    "publisher_agent": "general",
+    "planner_agent":        "planning",
+    "research_agent":       "research",
+    "scrape_agent":         "scrape",
+    "check_data_agent":     "data_adequacy",
+    "writer_agent":         "deep_writing",
+    "review_agent":         "review",
+    "reviser_agent":        "deep_writing",
+    "claim_verifier_agent": "claim_verification",
+    "publisher_agent":      "general",
 }
 
 
 def _ensure_route_agent_on_path() -> None:
-    """Add the Route_Agent project to sys.path if not already importable."""
-    try:
-        import route_agent  # noqa: F401
-        return
-    except ImportError:
-        pass
-    repo_root = Path(__file__).resolve().parents[3]
-    env_path = os.getenv("ROUTE_AGENT_PROJECT_PATH")
-    project_path = Path(env_path) if env_path else repo_root / "Route_Agent"
-    resolved = str(project_path.resolve())
-    if resolved not in sys.path and project_path.exists():
-        sys.path.insert(0, resolved)
+    """No-op: route-agent is now an editable install dependency."""
 
 
 class FederationAdapter:
@@ -54,9 +43,6 @@ class FederationAdapter:
         local_db_path: str | None = None,
         router_db_path: str | None = None,
     ) -> None:
-        _ensure_route_agent_on_path()
-        from route_agent.federation.client.route_client import RouteClient
-
         self._app_id = app_id
         self._server_url = server_url or os.getenv("ROUTE_AGENT_FEDERATION_URL", "")
         _local_db = local_db_path or os.getenv(

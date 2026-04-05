@@ -10,31 +10,23 @@ from colorama import Fore, Style, init
 import os
 from enum import Enum
 
-_SUPPORTED_PROVIDERS = {
-    "openai",
-    "anthropic",
-    "azure_openai",
-    "cohere",
-    "google_vertexai",
-    "google_genai",
-    "fireworks",
-    "ollama",
-    "together",
-    "mistralai",
-    "huggingface",
-    "groq",
-    "bedrock",
-    "dashscope",
-    "xai",
-    "deepseek",
-    "litellm",
-    "gigachat",
-    "openrouter",
-    "vllm_openai",
-    "aimlapi",
-    "netmind",
-    "relay",
-}
+from gpt_researcher.llm_provider.generic.relay import (
+    _SUPPORTED_PROVIDERS,
+    _RelayEndpointChatModel,
+    _is_relay_provider,
+    _relay_endpoint_mode,
+    _relay_group_suffix,  # noqa: F401  (re-exported for backward compatibility)
+    _resolve_relay_env,
+    _try_resolve_relay_env,
+    is_supported_provider,
+    normalize_response_text,
+)
+
+__all__ = [
+    "normalize_response_text",
+    "is_supported_provider",
+    "GenericLLMProvider",
+]
 
 NO_SUPPORT_TEMPERATURE_MODELS = [
     "deepseek/deepseek-reasoner",
@@ -88,13 +80,17 @@ class ChatLogger:
                 }) + "\n")
 
 class GenericLLMProvider:
+    """Thin provider facade that exposes one LangChain-compatible chat model."""
 
     def __init__(self, llm, chat_log: str | None = None,  verbose: bool = True):
+        """Initialize the provider wrapper."""
         self.llm = llm
         self.chat_logger = ChatLogger(chat_log) if chat_log else None
         self.verbose = verbose
+
     @classmethod
     def from_provider(cls, provider: str, chat_log: str | None = None, verbose: bool=True, **kwargs: Any):
+        """Create one provider wrapper from the configured backend name."""
         if provider == "openai":
             _check_pkg("langchain_openai")
             from langchain_openai import ChatOpenAI
@@ -247,17 +243,28 @@ class GenericLLMProvider:
             from langchain_netmind import ChatNetmind
 
             llm = ChatNetmind(**kwargs)
-        elif provider == "relay":
-            _check_pkg("langchain_openai")
-            from langchain_openai import ChatOpenAI
+        elif _is_relay_provider(provider):
+            endpoint_mode = _relay_endpoint_mode(provider)
+            if endpoint_mode == "chat_completions":
+                _check_pkg("langchain_openai")
+                from langchain_openai import ChatOpenAI
 
-            llm = ChatOpenAI(
-                openai_api_base=os.environ["RELAY_BASE_URL"],
-                openai_api_key=os.environ["RELAY_API_KEY"],
-                **kwargs
-            )
+                llm = ChatOpenAI(
+                    openai_api_base=_resolve_relay_env(provider, "BASE_URL"),
+                    openai_api_key=_resolve_relay_env(provider, "API_KEY"),
+                    **kwargs
+                )
+            else:
+                llm = _RelayEndpointChatModel(
+                    provider=provider,
+                    model=str(kwargs.get("model") or kwargs.get("model_name") or ""),
+                    base_url=_resolve_relay_env(provider, "BASE_URL"),
+                    api_key=_resolve_relay_env(provider, "API_KEY"),
+                    endpoint_mode=endpoint_mode,
+                    default_options=kwargs,
+                )
         else:
-            supported = ", ".join(_SUPPORTED_PROVIDERS)
+            supported = ", ".join(sorted(_SUPPORTED_PROVIDERS | {"relay_*"}))
             raise ValueError(
                 f"Unsupported {provider}.\n\nSupported model providers are: {supported}"
             )
@@ -265,11 +272,12 @@ class GenericLLMProvider:
 
 
     async def get_chat_response(self, messages, stream, websocket=None, **kwargs):
+        """Return one chat response as plain text."""
         if not stream:
             # Getting output from the model chain using ainvoke for asynchronous invoking
             output = await self.llm.ainvoke(messages, **kwargs)
 
-            res = output.content
+            res = normalize_response_text(getattr(output, "content", output))
 
         else:
             res = await self.stream_response(messages, websocket, **kwargs)
@@ -280,12 +288,13 @@ class GenericLLMProvider:
         return res
 
     async def stream_response(self, messages, websocket=None, **kwargs):
+        """Stream one response through the websocket or console."""
         paragraph = ""
         response = ""
 
         # Streaming the response using the chain astream method from langchain
         async for chunk in self.llm.astream(messages, **kwargs):
-            content = chunk.content
+            content = normalize_response_text(getattr(chunk, "content", chunk))
             if content is not None:
                 response += content
                 paragraph += content
@@ -299,6 +308,7 @@ class GenericLLMProvider:
         return response
 
     async def _send_output(self, content, websocket=None):
+        """Emit one output chunk to the configured sink."""
         if websocket is not None:
             await websocket.send_json({"type": "report", "output": content})
         elif self.verbose:

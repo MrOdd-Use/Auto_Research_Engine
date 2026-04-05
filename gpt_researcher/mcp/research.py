@@ -139,7 +139,7 @@ class MCPResearchSkill:
                 route_request = scope.build_request(
                     task=query,
                     system_prompt="MCP research with bound tools.",
-                    requested_model=self.cfg.strategic_llm_model,
+                    requested_model=None,
                     llm_provider=self.cfg.strategic_llm_provider,
                     metadata={"tool_count": len(selected_tools)},
                 )

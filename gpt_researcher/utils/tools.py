@@ -160,7 +160,7 @@ async def create_chat_completion_with_tools(
             route_request = scope.build_request(
                 task=_extract_user_task(messages),
                 system_prompt=_extract_system_prompt(messages),
-                requested_model=model or "",
+                requested_model=None,
                 llm_provider=llm_provider or "",
                 metadata={"tool_count": len(tools)},
             )

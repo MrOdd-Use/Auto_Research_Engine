@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import os
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -25,12 +27,13 @@ class RoutedLLMInvoker:
     def __init__(self, client: RouteAgentClient | None = None, *, event_logger: EventLogger | None = None) -> None:
         self.client = client or RouteAgentClient()
         self.event_logger = event_logger
+        self._startup_preflight_done = False
 
     async def invoke(
         self,
         *,
         provider_call: ProviderCall,
-        requested_model: str,
+        requested_model: str | None,
         llm_provider: str = "",
         route_request: RouteRequest | None = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -41,7 +44,7 @@ class RoutedLLMInvoker:
             metadata=metadata,
         )
         if request is None:
-            return await provider_call(requested_model)
+            return await provider_call(str(requested_model or ""))
 
         if self.client.is_federation and self.client.federation is not None:
             return await self._invoke_federation(
@@ -49,7 +52,17 @@ class RoutedLLMInvoker:
                 provider_call=provider_call,
             )
 
+        if self.client.is_local_full and self.client.local_full is not None:
+            return await self._invoke_local_full(
+                request=request,
+                provider_call=provider_call,
+            )
+
+        if getattr(self.client, "is_external_backend", False) is True:
+            await self._ensure_external_startup_preflight()
+
         decision = self.client.route(request)
+        runtime_context = getattr(decision, "runtime_context", None)
         selected_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
         self._emit(
             {
@@ -58,7 +71,7 @@ class RoutedLLMInvoker:
                 "shared_agent_class": decision.resolved_shared_agent_class,
                 "agent_role": request.agent_role,
                 "stage_name": request.stage_name,
-                "requested_model": requested_model,
+                "requested_model": request.requested_model,
                 "selected_model": decision.selected_model,
                 "selected_provider": decision.selected_provider,
                 "selected_model_id": selected_model_id,
@@ -87,19 +100,30 @@ class RoutedLLMInvoker:
             }
         )
         execution_id = self.client.start_execution_tracking(request, decision)
+        executed_model = decision.selected_model
+        executed_provider = decision.selected_provider
+        executed_model_id = selected_model_id
         try:
-            result = await self._invoke_provider(
-                provider_call=provider_call,
-                decision=decision,
-            )
+            if runtime_context is not None:
+                result, executed_model, executed_provider = await self._invoke_external_runtime(
+                    provider_call=provider_call,
+                    decision=decision,
+                )
+                executed_model_id = build_model_identifier(executed_provider, executed_model)
+            else:
+                result = await self._invoke_provider(
+                    provider_call=provider_call,
+                    decision=decision,
+                )
         except Exception as exc:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
-            self.client.record_execution_failure(
-                request.application_name,
-                decision.resolved_shared_agent_class,
-                decision.selected_model,
-                provider_failure=True,
-            )
+            if runtime_context is None:
+                self.client.record_execution_failure(
+                    request.application_name,
+                    decision.resolved_shared_agent_class,
+                    decision.selected_model,
+                    provider_failure=True,
+                )
             self.client.end_execution_tracking(
                 execution_id=execution_id,
                 status="failed",
@@ -114,9 +138,9 @@ class RoutedLLMInvoker:
                     "shared_agent_class": decision.resolved_shared_agent_class,
                     "agent_role": request.agent_role,
                     "stage_name": request.stage_name,
-                    "selected_model": decision.selected_model,
-                    "selected_provider": decision.selected_provider,
-                    "selected_model_id": selected_model_id,
+                    "selected_model": executed_model,
+                    "selected_provider": executed_provider,
+                    "selected_model_id": executed_model_id,
                     "route_latency_ms": decision.route_latency_ms,
                     "execution_latency_ms": duration_ms,
                     "error": str(exc),
@@ -126,11 +150,12 @@ class RoutedLLMInvoker:
             raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
-        self.client.record_quality_success(
-            request.application_name,
-            decision.resolved_shared_agent_class,
-            decision.selected_model,
-        )
+        if runtime_context is None:
+            self.client.record_quality_success(
+                request.application_name,
+                decision.resolved_shared_agent_class,
+                decision.selected_model,
+            )
         self.client.end_execution_tracking(
             execution_id=execution_id,
             status="completed",
@@ -144,14 +169,278 @@ class RoutedLLMInvoker:
                 "shared_agent_class": decision.resolved_shared_agent_class,
                 "agent_role": request.agent_role,
                 "stage_name": request.stage_name,
-                "selected_model": decision.selected_model,
-                "selected_provider": decision.selected_provider,
-                "selected_model_id": selected_model_id,
+                "selected_model": executed_model,
+                "selected_provider": executed_provider,
+                "selected_model_id": executed_model_id,
                 "route_latency_ms": decision.route_latency_ms,
                 "execution_latency_ms": duration_ms,
                 "trace_context": decision.trace_context,
             }
         )
+        return result
+
+    async def _ensure_external_startup_preflight(self) -> None:
+        """Probe the external Route_Agent pool once before the first routed call."""
+        if self._startup_preflight_done:
+            return
+
+        bridge = getattr(self.client, "external_bridge", None)
+        if bridge is None:
+            self._startup_preflight_done = True
+            return
+
+        max_models_raw = str(os.getenv("ROUTE_AGENT_PREFLIGHT_MAX_MODELS") or "").strip()
+        max_models = int(max_models_raw) if max_models_raw.isdigit() else None
+        results = await asyncio.to_thread(
+            lambda: bridge.probe_global_pool(
+                force=False,
+                limit=max_models,
+                mark_unavailable=True,
+            )
+        )
+        ok_count = sum(1 for item in results if item.get("ok"))
+        skipped_count = sum(1 for item in results if item.get("skipped"))
+        filtered = [
+            str(item.get("model_id") or "")
+            for item in results
+            if not item.get("ok") and not item.get("skipped")
+        ]
+        self._emit(
+            {
+                "type": "startup_preflight",
+                "backend": "external",
+                "checked_models": len(results),
+                "ok_count": ok_count,
+                "skipped_count": skipped_count,
+                "filtered_models": filtered,
+            }
+        )
+        self._startup_preflight_done = True
+        if results and ok_count == 0 and skipped_count == 0:
+            raise RuntimeError("external Route_Agent preflight found no reachable models")
+
+    async def _invoke_external_runtime(
+        self,
+        *,
+        provider_call: ProviderCall,
+        decision: RouteDecision,
+    ) -> tuple[Any, str, str]:
+        """Execute one external-routed request with failure writeback and failover."""
+        runtime = getattr(decision, "runtime_context", None)
+        if runtime is None:
+            result = await self._invoke_provider(provider_call=provider_call, decision=decision)
+            return result, decision.selected_model, decision.selected_provider
+
+        queue = self._build_candidate_queue(decision)
+        attempted_model_ids: set[str] = set()
+        last_exc: Exception | None = None
+
+        while queue:
+            candidate = queue.pop(0)
+            model = str(candidate.get("model") or decision.selected_model)
+            provider = str(candidate.get("provider") or decision.selected_provider)
+            model_id = str(candidate.get("model_id") or build_model_identifier(provider, model))
+            if model_id in attempted_model_ids:
+                continue
+            attempted_model_ids.add(model_id)
+
+            try:
+                if self._provider_call_accepts_provider(provider_call):
+                    result = await provider_call(model, provider)
+                else:
+                    result = await provider_call(model)
+            except Exception as exc:
+                last_exc = exc
+                next_model_id = await runtime.handle_execution_failure(
+                    model_id,
+                    str(exc),
+                    hard_unavailable=self._is_hard_unavailable_error(exc),
+                )
+                if _is_quota_error(exc) and queue:
+                    self._emit(
+                        {
+                            "type": "quota_fallback",
+                            "failed_model": model,
+                            "failed_provider": provider,
+                            "next_model": queue[0].get("model"),
+                            "error": str(exc)[:200],
+                        }
+                    )
+                    continue
+
+                if next_model_id:
+                    promoted = self._promote_candidate(queue, next_model_id, attempted_model_ids)
+                    if promoted is not None:
+                        self._emit(
+                            {
+                                "type": "execution_escalation",
+                                "kind": "escalate",
+                                "failed_model": model,
+                                "failed_provider": provider,
+                                "next_model": promoted.get("model"),
+                                "next_provider": promoted.get("provider"),
+                                "error": str(exc)[:200],
+                            }
+                        )
+                        continue
+
+                if queue:
+                    self._emit(
+                        {
+                            "type": "execution_escalation",
+                            "kind": "failover",
+                            "failed_model": model,
+                            "failed_provider": provider,
+                            "next_model": queue[0].get("model"),
+                            "next_provider": queue[0].get("provider"),
+                            "error": str(exc)[:200],
+                        }
+                    )
+                    continue
+                raise
+
+            await runtime.handle_execution_success(model_id)
+            return result, model, provider
+
+        assert last_exc is not None
+        raise last_exc
+
+    def _build_candidate_queue(self, decision: RouteDecision) -> list[dict[str, Any]]:
+        """Build the execution queue with the selected model first."""
+        current_model_id = build_model_identifier(
+            decision.selected_provider,
+            decision.selected_model,
+            target="route_agent",
+        )
+        current = {
+            "model": decision.selected_model,
+            "provider": decision.selected_provider,
+            "model_id": current_model_id,
+        }
+        queue = [current]
+        for candidate in list(decision.candidates or []):
+            candidate_model_id = str(
+                candidate.get("model_id")
+                or build_model_identifier(
+                    str(candidate.get("provider") or ""),
+                    str(candidate.get("model") or ""),
+                    target="route_agent",
+                )
+            )
+            if candidate_model_id == current_model_id:
+                continue
+            queue.append(
+                {
+                    **dict(candidate),
+                    "model_id": candidate_model_id,
+                }
+            )
+        return queue
+
+    def _promote_candidate(
+        self,
+        queue: list[dict[str, Any]],
+        model_id: str,
+        attempted_model_ids: set[str],
+    ) -> dict[str, Any] | None:
+        """Move the requested model to the front of the remaining queue."""
+        for index, candidate in enumerate(queue):
+            candidate_model_id = str(
+                candidate.get("model_id")
+                or build_model_identifier(
+                    str(candidate.get("provider") or ""),
+                    str(candidate.get("model") or ""),
+                    target="route_agent",
+                )
+            )
+            if candidate_model_id != model_id:
+                continue
+            if candidate_model_id in attempted_model_ids:
+                return None
+            promoted = queue.pop(index)
+            queue.insert(0, promoted)
+            return promoted
+        return None
+
+    def _is_hard_unavailable_error(self, exc: BaseException) -> bool:
+        """Return whether the error should immediately mark a model unavailable."""
+        message = str(exc).lower()
+        patterns = (
+            "no available channel",
+            "unsupported model",
+            "model not found",
+            "does not exist",
+            "invalid_request_error",
+            "authentication",
+            "unauthorized",
+            "permission denied",
+        )
+        return any(pattern in message for pattern in patterns)
+
+    async def _invoke_local_full(
+        self,
+        *,
+        request: RouteRequest,
+        provider_call: ProviderCall,
+    ) -> Any:
+        """local_full path: route via LocalOnlyAdapter → invoke → report_outcome (local DB only)."""
+        local_full = self.client.local_full
+        assert local_full is not None
+
+        decision, _lease_id = await local_full.route(request)
+        selected_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
+        self._emit({
+            "type": "route_decision",
+            "backend": "local_full",
+            "application_name": request.application_name,
+            "shared_agent_class": decision.resolved_shared_agent_class,
+            "selected_model": decision.selected_model,
+            "selected_provider": decision.selected_provider,
+            "selected_model_id": selected_model_id,
+            "routing_reason": decision.routing_reason,
+            "trace_context": decision.trace_context,
+        })
+
+        started_at = time.perf_counter()
+        try:
+            result = await self._invoke_provider(
+                provider_call=provider_call,
+                decision=decision,
+            )
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
+            await local_full.report_outcome(
+                lease_id="",
+                model_id=decision.selected_model,
+                agent_class=decision.resolved_shared_agent_class,
+                outcome_type="exec_fail",
+                duration_ms=int(duration_ms),
+            )
+            self._emit({
+                "type": "execution_end",
+                "backend": "local_full",
+                "status": "failed",
+                "selected_model": decision.selected_model,
+                "execution_latency_ms": duration_ms,
+                "error": str(exc),
+            })
+            raise
+
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 4)
+        await local_full.report_outcome(
+            lease_id="",
+            model_id=decision.selected_model,
+            agent_class=decision.resolved_shared_agent_class,
+            outcome_type="exec_success",
+            duration_ms=int(duration_ms),
+        )
+        self._emit({
+            "type": "execution_end",
+            "backend": "local_full",
+            "status": "completed",
+            "selected_model": decision.selected_model,
+            "execution_latency_ms": duration_ms,
+        })
         return result
 
     async def _invoke_federation(
@@ -279,7 +568,7 @@ class RoutedLLMInvoker:
     def _build_request_from_scope(
         self,
         *,
-        requested_model: str,
+        requested_model: str | None,
         llm_provider: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> RouteRequest | None:
@@ -290,7 +579,7 @@ class RoutedLLMInvoker:
         return scope.build_request(
             task=str(metadata.get("task") or ""),
             system_prompt=str(metadata.get("system_prompt") or ""),
-            requested_model=requested_model,
+            requested_model=None,
             llm_provider=llm_provider,
             metadata=metadata,
         )

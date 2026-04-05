@@ -14,6 +14,7 @@ from .storage.store import LayeredRoutingStore
 
 if TYPE_CHECKING:
     from .federation_adapter import FederationAdapter
+    from .local_adapter import LocalOnlyAdapter
 
 
 class RouteAgentClient:
@@ -105,11 +106,19 @@ class RouteAgentClient:
             else None
         )
         self._federation: "FederationAdapter | None" = None
+        self._local_full: "LocalOnlyAdapter | None" = None
         if self.backend == "federation":
             from .federation_adapter import FederationAdapter
             self._federation = FederationAdapter(
                 app_id=application_name,
                 server_url=federation_url,
+                local_db_path=federation_local_db,
+                router_db_path=federation_router_db,
+            )
+        elif self.backend == "local_full":
+            from .local_adapter import LocalOnlyAdapter
+            self._local_full = LocalOnlyAdapter(
+                app_id=application_name,
                 local_db_path=federation_local_db,
                 router_db_path=federation_router_db,
             )
@@ -124,22 +133,39 @@ class RouteAgentClient:
         return self._federation is not None
 
     @property
+    def is_local_full(self) -> bool:
+        return self._local_full is not None
+
+    @property
     def federation(self) -> "FederationAdapter | None":
         return self._federation
+
+    @property
+    def local_full(self) -> "LocalOnlyAdapter | None":
+        return self._local_full
 
     @property
     def external_error(self) -> str:
         return self._external_error
 
+    @property
+    def external_bridge(self) -> ExternalRouteAgentBridge | None:
+        """Expose the external bridge for runtime preflight and feedback hooks."""
+        return self._external_bridge
+
     async def astart(self) -> None:
-        """Start async resources (federation background sync)."""
+        """Start async resources (federation / local_full background tasks)."""
         if self._federation is not None:
             await self._federation.start()
+        if self._local_full is not None:
+            await self._local_full.start()
 
     async def astop(self) -> None:
-        """Stop async resources (federation cleanup)."""
+        """Stop async resources."""
         if self._federation is not None:
             await self._federation.stop()
+        if self._local_full is not None:
+            await self._local_full.stop()
 
     def route(self, request: RouteRequest) -> RouteDecision:
         if self._external_bridge is not None:

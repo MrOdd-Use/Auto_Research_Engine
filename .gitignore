@@ -58,5 +58,6 @@ outputs/route_agent_test/*.log
 outputs/route_agent_test/*.jsonl
 outputs/route_agent_test/*.json
 outputs/route_agent_test/run_*/
+outputs/route_agent_test/????-??-??_*/
 outputs/route_agent_test/initial_draft.md
 outputs/route_agent_test/final_draft.md
