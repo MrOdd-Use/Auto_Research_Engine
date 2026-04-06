@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
@@ -344,7 +345,34 @@ class RouteAgentClient:
             }
 
         candidates.sort(key=lambda item: item["score"], reverse=True)
-        selected = candidates[0]["model"] if candidates else request.requested_model or "gpt-4o-mini"
+
+        # 分类池模型（有正向加成）vs 探索模型，筛掉不可连通的池模型
+        pool_model_ids = {
+            c["model"] for c in candidates
+            if any(
+                score_breakdown[c["model"]].get(k, 0.0) > 0.0
+                for k in ("shared_class_bonus", "app_local_bonus", "default_bonus")
+            )
+        }
+        connectable_pool = [
+            c for c in candidates
+            if c["model"] in pool_model_ids
+            and self.store.get_global_penalty(c["model"]) < 100.0
+        ]
+
+        if len(connectable_pool) < 3:
+            # 可连通池模型不足 3 个：探索位增至 3 个，从可连通池模型 + 探索位中随机选择
+            non_pool_connectable = [
+                c for c in candidates
+                if c["model"] not in pool_model_ids
+                and self.store.get_global_penalty(c["model"]) < 100.0
+            ]
+            combined = connectable_pool + non_pool_connectable[:3]
+            selected = random.choice(combined)["model"] if combined else (
+                candidates[0]["model"] if candidates else request.requested_model or "gpt-4o-mini"
+            )
+        else:
+            selected = candidates[0]["model"] if candidates else request.requested_model or "gpt-4o-mini"
         selection_ms = (time.perf_counter() - selection_start) * 1000
         route_ms = (time.perf_counter() - start) * 1000
         selected_provider = request.llm_provider or self._model_provider_map.get(selected, "")
