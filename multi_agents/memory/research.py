@@ -7,7 +7,7 @@ class ResearchState(TypedDict):
     sections: List[str]
     section_details: List[dict]
     research_data: List[dict]
-    scrap_packets: List[dict]
+    scraping_packets: List[dict]
     check_data_reports: List[dict]
     audit_feedback_queue: List[dict]
     extra_hints: Optional[str]

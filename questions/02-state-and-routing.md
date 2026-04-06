@@ -1,4 +1,4 @@
-﻿# 状态建模与路由
+# 状态建模与路由
 
 > 覆盖题号：Q07, Q21, Q21a
 
@@ -62,7 +62,7 @@
 - multi_agents/agents/editor.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：全局状态用 `ResearchState` 保存端到端产物（章节详情、并行研究结果、审阅/修订、发布稿等），章节状态用 `DraftState` 保存单章闭环信息（topic/context/iteration/check_data_action/scrap_packet/draft 等）（见 `multi_agents/memory/research.py`、`multi_agents/memory/draft.py`）。
+- 实现：全局状态用 `ResearchState` 保存端到端产物（章节详情、并行研究结果、审阅/修订、发布稿等），章节状态用 `DraftState` 保存单章闭环信息（topic/context/iteration/check_data_action/scraping_packet/draft 等）（见 `multi_agents/memory/research.py`、`multi_agents/memory/draft.py`）。
 - 为什么：全局 state 负责路由与聚合，章节 state 负责并行与局部回流，降低节点耦合。
 - 利弊：利是并行与回放更清晰；弊是 state 膨胀与字段语义漂移风险，需要摘要化与 schema 版本化（可选升级）。
 
@@ -99,7 +99,7 @@
 - `research_context`：规划阶段注入的章节上下文（常见含 `description/key_points/research_queries`）。
 - `extra_hints`：额外约束提示（常由门禁失败生成，用于下一轮更定向检索）。
 - `audit_feedback`：门禁/满意度信号包（如 `is_satisfied/confidence_score/instruction/new_query_suggestion`），用于驱动是否进入下一轮。
-- `scrap_packet`：证据包与过程记录（例如每个 search target 的 top passages、使用的引擎、轮次信息等）。
+- `scraping_packet`：证据包与过程记录（例如每个 search target 的 top passages、使用的引擎、轮次信息等）。
 - `check_data_action`：章节门禁的路由动作（典型：`accept` / `retry` / `blocked`）。
 - `check_data_verdict`：门禁判定报告（包含约束抽取、命中/缺失原因、分数、反馈包等）。
 - 补充：`check_data_verdict.atomic_claims` 是“原子化约束”（常见字段名为 `subject` / `time_constraint` / `metric` / `negative_constraints`），用于把“本章必须对齐的口径”变成可校验的最小集合：
@@ -114,7 +114,7 @@
 - `revision_notes`：修订说明（告诉审阅者“我按哪些意见改了什么”）。
 
 **这些字段是如何产生的？（单章闭环，口述版）**
-一般是先由章节级调度把输入拼成一份 `DraftState`：带上全局 `task`、本章 `topic`、初始 `iteration_index=1`，以及 Planner 给该章的 `research_context`（description/key_points/research_queries）（见 `multi_agents/agents/editor.py`、`multi_agents/memory/draft.py`）。随后进入证据采集阶段，产出 `scrap_packet`（证据片段/来源/引擎与轮次信息），并在此基础上形成该章 `draft`（见 `multi_agents/agents/scrap.py`）。接着校验阶段会读取 `scrap_packet` 与 `research_context`，生成 `check_data_verdict`（含 `atomic_claims`、缺口与评分等）并写入 `check_data_action`：如果需要补证据则把缺口与建议查询写回到 `audit_feedback` 与 `extra_hints`、同时递增 `iteration_index` 触发下一轮；如果通过则保留当前草稿与证据包并结束；如果证据明显不足则输出占位稿并结束（见 `multi_agents/agents/check_data.py`）。若启用审阅/修订链路，Reviewer 会写入 `review`，Reviser 会基于 `review` 产出修订版 `draft` 并写入 `revision_notes`（见 `multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。
+一般是先由章节级调度把输入拼成一份 `DraftState`：带上全局 `task`、本章 `topic`、初始 `iteration_index=1`，以及 Planner 给该章的 `research_context`（description/key_points/research_queries）（见 `multi_agents/agents/editor.py`、`multi_agents/memory/draft.py`）。随后进入证据采集阶段，产出 `scraping_packet`（证据片段/来源/引擎与轮次信息），并在此基础上形成该章 `draft`（见 `multi_agents/agents/scraping.py`）。接着校验阶段会读取 `scraping_packet` 与 `research_context`，生成 `check_data_verdict`（含 `atomic_claims`、缺口与评分等）并写入 `check_data_action`：如果需要补证据则把缺口与建议查询写回到 `audit_feedback` 与 `extra_hints`、同时递增 `iteration_index` 触发下一轮；如果通过则保留当前草稿与证据包并结束；如果证据明显不足则输出占位稿并结束（见 `multi_agents/agents/check_data.py`）。若启用审阅/修订链路，Reviewer 会写入 `review`，Reviser 会基于 `review` 产出修订版 `draft` 并写入 `revision_notes`（见 `multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。
 
 **字段解释：`ResearchState`（全局）**（见 `multi_agents/memory/research.py`）
 - `task`：全局任务配置（同上）。
@@ -125,7 +125,7 @@
 - `audit_feedback_queue`：可选的门禁反馈队列（用于给并行章节提供不同的起始约束/提示）。
 - `extra_hints`：全局额外提示（会被注入到各章节的检索/写作约束里）。
 - `research_data`：并行章节产物的聚合列表（每项通常是“章节标题→章节草稿”的 dict）。
-- `scrap_packets`：并行章节证据包的聚合列表（用于审计/复盘/引用）。
+- `scraping_packets`：并行章节证据包的聚合列表（用于审计/复盘/引用）。
 - `check_data_reports`：并行章节门禁报告的聚合列表（用于质量追踪与调参）。
 - 补充：原子化约束抽取（`subject/time_constraint/metric/negative_constraints`）是否在 `ResearchState`？不作为顶层字段单独存，但会包含在 `check_data_reports` 的每条章节门禁报告里（每章 `DraftState.check_data_verdict.atomic_claims` 聚合到全局）。
 - `title`：报告标题。
@@ -148,7 +148,7 @@
 - `report`：发布阶段输出的最终报告文本（通常为完整 markdown）。
 
 **这些字段是如何产生的？（全局链路，口述版）**
-全局流程从 `task` 启动，先在初始研究阶段写入 `initial_research`，供后续规划使用（见 `multi_agents/agents/orchestrator.py`）。规划阶段会基于初始研究生成章节结构与可执行细节，写入 `section_details`（并保留兼容字段 `sections`），同时补齐 `title/date` 等全局信息（见 `multi_agents/agents/editor.py`、`multi_agents/memory/research.py`）。如果开启 HITL，`human_feedback` 用来决定是否接受大纲或回流重规划（见 `multi_agents/agents/orchestrator.py`）。进入并行深研后，每章会跑各自的章节闭环，再把章节草稿聚合到 `research_data`，证据包聚合到 `scrap_packets`，门禁报告聚合到 `check_data_reports`（见 `multi_agents/agents/editor.py`）。Writer 会在聚合结果之上生成引言/结论/目录/来源、`claim_annotations` 与版式标题等内容，写入 `introduction/conclusion/table_of_contents/sources/claim_annotations/headers`（见 `multi_agents/agents/writer.py`、`multi_agents/memory/research.py`）。随后 ClaimVerifier 会构建 `source_index`、刷新 `indexed_research_data`、输出 `claim_confidence_report`，并在必要时触发按章节的 reflexion rerun（见 `multi_agents/agents/claim_verifier.py`、`multi_agents/agents/orchestrator.py`）。终稿层面再进入审阅/修订循环：`review/revision_notes/review_iterations/_draft_before_revision` 记录审阅意见、修订说明、回合数与 diff 对照基线，`final_draft` 保存当前可发布版本（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。最后 Publisher 生成完整布局写入 `report` 并导出多格式文件（见 `multi_agents/agents/publisher.py`）。
+全局流程从 `task` 启动，先在初始研究阶段写入 `initial_research`，供后续规划使用（见 `multi_agents/agents/orchestrator.py`）。规划阶段会基于初始研究生成章节结构与可执行细节，写入 `section_details`（并保留兼容字段 `sections`），同时补齐 `title/date` 等全局信息（见 `multi_agents/agents/editor.py`、`multi_agents/memory/research.py`）。如果开启 HITL，`human_feedback` 用来决定是否接受大纲或回流重规划（见 `multi_agents/agents/orchestrator.py`）。进入并行深研后，每章会跑各自的章节闭环，再把章节草稿聚合到 `research_data`，证据包聚合到 `scraping_packets`，门禁报告聚合到 `check_data_reports`（见 `multi_agents/agents/editor.py`）。Writer 会在聚合结果之上生成引言/结论/目录/来源、`claim_annotations` 与版式标题等内容，写入 `introduction/conclusion/table_of_contents/sources/claim_annotations/headers`（见 `multi_agents/agents/writer.py`、`multi_agents/memory/research.py`）。随后 ClaimVerifier 会构建 `source_index`、刷新 `indexed_research_data`、输出 `claim_confidence_report`，并在必要时触发按章节的 reflexion rerun（见 `multi_agents/agents/claim_verifier.py`、`multi_agents/agents/orchestrator.py`）。终稿层面再进入审阅/修订循环：`review/revision_notes/review_iterations/_draft_before_revision` 记录审阅意见、修订说明、回合数与 diff 对照基线，`final_draft` 保存当前可发布版本（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/reviewer.py`、`multi_agents/agents/reviser.py`）。最后 Publisher 生成完整布局写入 `report` 并导出多格式文件（见 `multi_agents/agents/publisher.py`）。
 
 常见坑/反杀点：
 - `sections` vs `section_details`：前者是“仅标题”的旧结构，后者是可执行的结构化大纲；面试要说清楚两者关系。
@@ -162,8 +162,8 @@
 **一句话结论：** 全局 state 管聚合与终稿，章节 state 管单章证据闭环；路由只看少量“信号字段”。
 
 **实现落点：**
-- `multi_agents/memory/research.py`：`ResearchState`（全局）含 `human_feedback`（HITL 路由）、`claim_confidence_report/source_index`（Writer 后事实性状态）、`review`（终稿接受/修订）、`review_iterations`（终稿上限）、以及聚合字段 `scrap_packets/check_data_reports`。
-- `multi_agents/memory/draft.py`：`DraftState`（章节）含 `check_data_action`（accept/retry/blocked）、`iteration_index`、`extra_hints`、`scrap_packet`、`check_data_verdict`。
+- `multi_agents/memory/research.py`：`ResearchState`（全局）含 `human_feedback`（HITL 路由）、`claim_confidence_report/source_index`（Writer 后事实性状态）、`review`（终稿接受/修订）、`review_iterations`（终稿上限）、以及聚合字段 `scraping_packets/check_data_reports`。
+- `multi_agents/memory/draft.py`：`DraftState`（章节）含 `check_data_action`（accept/retry/blocked）、`iteration_index`、`extra_hints`、`scraping_packet`、`check_data_verdict`。
 - `multi_agents/agents/editor.py`：章节级 workflow 读取 `check_data_action` 决定重试还是结束该章。
 
 **为什么这样设计：**
@@ -171,9 +171,9 @@
 
 **追问补充：回流重跑是全量还是增量？状态如何复用/回滚？**
 - HITL 回流是“规划节点重跑”：有 `human_feedback` 时回到 planner，但不会回到 `browser`（初始研究复用），因此不是全链路全量重跑。
-- 章节证据回流发生在 `DraftState` 内：`check_data_action=retry` 会路由回章节 researcher/scrap，`iteration_index` 递增；ClaimVerifier 的 `SUSPICIOUS` 断言也会按真实 `section_key` 触发章节级 rerun，并在重跑后只追加新的 evidence 到 `source_index`。
+- 章节证据回流发生在 `DraftState` 内：`check_data_action=retry` 会路由回章节 researcher/scraping，`iteration_index` 递增；ClaimVerifier 的 `SUSPICIOUS` 断言也会按真实 `section_key` 触发章节级 rerun，并在重跑后只追加新的 evidence 到 `source_index`。
 - `Rerun from Checkpoint` 是另一条更广义的回放链路：`multi_agents/workflow_session.py` 会持久化 global/section checkpoints，手动 rerun 会从选中的 checkpoint 恢复 `state_before` 并重算下游路径，同时保留 parent/child session 历史与 `last_successful_session_id`。
-- 缓存现状：ASA `ScrapAgent` 没有跨轮 evidence cache；每轮仅做 URL 归一化去重与抓取物化，再进入分段与 MMR 选片。可选升级：跨轮缓存“已抓取正文/已选片段”并做内容级 canonical，以减少重复抓取与同质证据。
+- 缓存现状：ASA `ScrapingAgent` 没有跨轮 evidence cache；每轮仅做 URL 归一化去重与抓取物化，再进入分段与 MMR 选片。可选升级：跨轮缓存“已抓取正文/已选片段”并做内容级 canonical，以减少重复抓取与同质证据。
 
 **利弊与边界：**
 - 利：并行/回流粒度清晰；调试时能定位“是某一章证据不足”还是“终稿审阅不通过”。

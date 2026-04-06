@@ -3,16 +3,16 @@ import pytest
 from multi_agents.agents.editor import EditorAgent
 
 
-class _FakeScrapAgent:
+class _FakeScrapingAgent:
     def __init__(self, counter):
         self.counter = counter
 
-    async def run_depth_scrap(self, draft_state):
+    async def run_depth_scraping(self, draft_state):
         self.counter["research"] += 1
         current_iteration = int(draft_state.get("iteration_index") or 1)
         return {
             "draft": {draft_state["topic"]: f"draft-at-{current_iteration}"},
-            "scrap_packet": {
+            "scraping_packet": {
                 "iteration_index": current_iteration,
                 "model_level": "Level_1_Base",
                 "active_engines": ["tavily"],
@@ -116,11 +116,11 @@ class _FakeReviser:
 async def test_editor_workflow_retries_then_accepts():
     counter = {"research": 0, "check_data": 0, "reviewer": 0, "reviser": 0}
     agent = EditorAgent()
-    agent.enable_scrap = True
+    agent.enable_scraping = True
 
     workflow = agent._create_workflow(
         {
-            "scrap": _FakeScrapAgent(counter),
+            "scraping": _FakeScrapingAgent(counter),
             "research": None,
             "check_data": _FakeCheckDataRetryThenAccept(counter),
             "reviewer": _FakeReviewer(counter),
@@ -150,11 +150,11 @@ async def test_editor_workflow_retries_then_accepts():
 async def test_editor_workflow_blocked_branch_skips_reviewer():
     counter = {"research": 0, "check_data": 0, "reviewer": 0, "reviser": 0}
     agent = EditorAgent()
-    agent.enable_scrap = True
+    agent.enable_scraping = True
 
     workflow = agent._create_workflow(
         {
-            "scrap": _FakeScrapAgent(counter),
+            "scraping": _FakeScrapingAgent(counter),
             "research": None,
             "check_data": _FakeCheckDataBlocked(counter),
             "reviewer": _FakeReviewer(counter),

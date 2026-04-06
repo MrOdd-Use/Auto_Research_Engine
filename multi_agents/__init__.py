@@ -5,7 +5,7 @@ from importlib import import_module
 
 _EXPORT_MAP = {
     "ResearchAgent": "multi_agents.agents",
-    "ScrapAgent": "multi_agents.agents",
+    "ScrapingAgent": "multi_agents.agents",
     "WriterAgent": "multi_agents.agents",
     "PublisherAgent": "multi_agents.agents",
     "ReviserAgent": "multi_agents.agents",

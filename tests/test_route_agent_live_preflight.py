@@ -3,6 +3,7 @@ import json
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+import gpt_researcher.llm_provider.generic.relay as llm_relay
 from gpt_researcher.llm_provider.generic import base as llm_base
 from multi_agents.route_agent.client import RouteAgentClient
 from multi_agents.route_agent.models import RouteExecutionContext, RouteRequest
@@ -279,7 +280,15 @@ async def test_grouped_relay_messages_wrapper_uses_messages_endpoint_and_tool_re
         )
         return _FakeHTTPResponse(responses[len(posts) - 1])
 
-    monkeypatch.setattr(llm_base.requests, "post", fake_post)
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, url, *, headers=None, json=None, timeout=None):
+            return fake_post(url, headers=headers, json=json, timeout=timeout)
+
+    monkeypatch.setattr(llm_relay.httpx, "AsyncClient", _FakeAsyncClient)
 
     provider = llm_base.GenericLLMProvider.from_provider(
         "relay_cc_glm",
@@ -415,7 +424,15 @@ async def test_grouped_relay_responses_wrapper_uses_responses_endpoint_and_repla
         )
         return _FakeHTTPResponse(responses[len(posts) - 1])
 
-    monkeypatch.setattr(llm_base.requests, "post", fake_post)
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, url, *, headers=None, json=None, timeout=None):
+            return fake_post(url, headers=headers, json=json, timeout=timeout)
+
+    monkeypatch.setattr(llm_relay.httpx, "AsyncClient", _FakeAsyncClient)
 
     provider = llm_base.GenericLLMProvider.from_provider(
         "relay_codex",

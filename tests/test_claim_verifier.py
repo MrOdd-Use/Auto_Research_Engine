@@ -11,8 +11,8 @@ def agent():
 # ── build_source_index ────────────────────────────────────────────────
 
 
-def _make_scrap_packets(passages):
-    """Build scrap_packets from a list of (content, source_url) tuples."""
+def _make_scraping_packets(passages):
+    """Build scraping_packets from a list of (content, source_url) tuples."""
     return [
         {
             "search_log": [
@@ -30,7 +30,7 @@ def _make_scrap_packets(passages):
 
 class TestBuildSourceIndex:
     def test_basic_indexing(self, agent):
-        packets = _make_scrap_packets([
+        packets = _make_scraping_packets([
             ("Apple revenue $128B", "https://reuters.com/article1"),
             ("Apple Q1 earnings", "https://bloomberg.com/news/123"),
         ])
@@ -49,7 +49,7 @@ class TestBuildSourceIndex:
         assert formatted == ""
 
     def test_append_only_with_start_id(self, agent):
-        packets = _make_scrap_packets([
+        packets = _make_scraping_packets([
             ("New passage", "https://newsite.com/page"),
         ])
         index, formatted = agent.build_source_index(packets, start_id=5)
@@ -59,14 +59,14 @@ class TestBuildSourceIndex:
         assert "[S5]" in formatted
 
     def test_domain_extraction_www_prefix(self, agent):
-        packets = _make_scrap_packets([
+        packets = _make_scraping_packets([
             ("Content", "https://www.example.com/page"),
         ])
         index, _ = agent.build_source_index(packets)
         assert index["S1"]["domain"] == "example.com"
 
     def test_skips_empty_content(self, agent):
-        packets = _make_scrap_packets([
+        packets = _make_scraping_packets([
             ("", "https://example.com/1"),
             ("Valid content", "https://example.com/2"),
         ])
@@ -75,7 +75,7 @@ class TestBuildSourceIndex:
         assert "S1" in index
 
     def test_includes_section_metadata(self, agent):
-        packets = _make_scrap_packets([
+        packets = _make_scraping_packets([
             ("Valid content", "https://example.com/2"),
         ])
         index, _ = agent.build_source_index(

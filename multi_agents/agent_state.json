@@ -8,7 +8,7 @@
       "gpt-4o-mini"
     ]
   },
-  "scrap": {
+  "scraping": {
     "current_idx": 3,
     "tiers": [
       "o1-preview",

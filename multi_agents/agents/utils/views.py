@@ -4,7 +4,7 @@ from enum import Enum
 
 class AgentColor(Enum):
     RESEARCHER = Fore.LIGHTBLUE_EX
-    SCRAP = Fore.LIGHTMAGENTA_EX
+    SCRAPING = Fore.LIGHTMAGENTA_EX
     CHECK_DATA = Fore.LIGHTCYAN_EX
     EDITOR = Fore.YELLOW
     WRITER = Fore.LIGHTGREEN_EX

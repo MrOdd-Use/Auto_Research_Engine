@@ -39,7 +39,7 @@ The `multi_agents` workflow supports `节点回溯` (`Rerun from Checkpoint`).
 
 - Every initial run or rerun creates a new workflow session tied to the same `report_id`
 - Global nodes such as `browser`, `planner`, `researcher`, `writer`, `reviewer`, `reviser`, and `publisher` are stored as rerunnable checkpoints
-- Section-level checkpoints are also stored, including `scrap` and `check_data` when ASA is enabled
+- Section-level checkpoints are also stored, including `scraping` and `check_data` when ASA is enabled
 - A rerun only recomputes the selected node and its downstream path
 - Multi-round edits are preserved as parent/child sessions, so the latest failed rerun does not overwrite the last successful result
 

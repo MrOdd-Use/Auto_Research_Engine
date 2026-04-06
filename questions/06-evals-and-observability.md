@@ -130,7 +130,7 @@ completeness = 0.5 * section_completion
 **标准答案（可直接说）：**
 一句话：tiering 是把模型按能力/成本分层，并按 agent 角色与轮次策略选择档位；本项目用持久化状态记录每个 agent 的当前档位，实现按轮次/阶段调整模型。
 
-展开：仓库提供持久化的“档位状态管理”，为不同 agent（planner/scrap/check_data/writer/review/revise）配置 tier 列表与当前索引，写入 `agent_state.json`。在证据采集与校验阶段，会根据轮次/重试次数设置档位，从而在关键轮次使用更强模型，在常规轮次使用更轻量模型，达到质量与成本的平衡（tiered routing）。
+展开：仓库提供持久化的“档位状态管理”，为不同 agent（planner/scraping/check_data/writer/review/revise）配置 tier 列表与当前索引，写入 `agent_state.json`。在证据采集与校验阶段，会根据轮次/重试次数设置档位，从而在关键轮次使用更强模型，在常规轮次使用更轻量模型，达到质量与成本的平衡（tiered routing）。
 
 常见坑/反杀点：
 - 不要把 tiering 说成“随机换模型”；要强调有状态、可控、按阶段策略。
@@ -139,10 +139,10 @@ completeness = 0.5 * section_completion
 **相关模块（对应实现）：**
 - multi_agents/agents/state_controller.py
 - multi_agents/agent_state.json
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：多智能体侧用 `StateController` + `agent_state.json` 维护每个 agent 的模型 tiers 与当前档位，并在 Scrap/CheckData 等阶段按轮次切换 tier（见 `multi_agents/agents/state_controller.py`、`multi_agents/agent_state.json`、`multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`）。单体研究侧在配置里区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`）。
+- 实现：多智能体侧用 `StateController` + `agent_state.json` 维护每个 agent 的模型 tiers 与当前档位，并在 Scraping/CheckData 等阶段按轮次切换 tier（见 `multi_agents/agents/state_controller.py`、`multi_agents/agent_state.json`、`multi_agents/agents/scraping.py`、`multi_agents/agents/check_data.py`）。单体研究侧在配置里区分 fast/smart/strategic LLM（见 `gpt_researcher/config/config.py`）。
 - 为什么：把“便宜快”和“贵强”用在不同节点与不同失败模式上，控制成本同时保住关键质量。
 - 利弊：利是预算可控、失败可升级；弊是路由策略需要回归评测支撑，否则容易出现风格漂移或关键节点用错模型。
 
@@ -218,11 +218,11 @@ completeness = 0.5 * section_completion
 
 **相关模块（对应实现）：**
 - multi_agents/agents/state_controller.py
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - multi_agents/agents/check_data.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：成本/时延控制主要靠：迭代上限（`scrap_max_iterations`、`check_data_max_retries`）、检索条数上限、MMR 时间预算上限、按轮次切换更强/更弱模型 tiers（见 `multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`、`multi_agents/agents/state_controller.py`）。并行粒度以“章节”为主（见 `multi_agents/agents/editor.py`）。
+- 实现：成本/时延控制主要靠：迭代上限（`scraping_max_iterations`、`check_data_max_retries`）、检索条数上限、MMR 时间预算上限、按轮次切换更强/更弱模型 tiers（见 `multi_agents/agents/scraping.py`、`multi_agents/agents/check_data.py`、`multi_agents/agents/state_controller.py`）。并行粒度以“章节”为主（见 `multi_agents/agents/editor.py`）。
 - 为什么：研究链路的主要开销来自检索/抓取与高阶模型；需要把“升级”变成可控的条件分支而不是默认路径。
 - 利弊：利是预算可预测；弊是上限过紧会导致覆盖不足，上限过松会导致成本爆炸，需要用评测与在线指标（失败率/覆盖度/引用数）驱动调参。
 
@@ -252,7 +252,7 @@ completeness = 0.5 * section_completion
 **一句话结论：** 用 tiers 把“贵模型”留给关键轮次，用 tracing+evals 做回归门禁，避免越改越飘、越跑越贵。
 
 **实现落点：**
-- `multi_agents/agents/state_controller.py` + `multi_agents/agent_state.json`：保存每个 agent 的 tiers 与当前档位；scrap/check_data 会按轮次调用 tier 切换（见 `multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`）。
+- `multi_agents/agents/state_controller.py` + `multi_agents/agent_state.json`：保存每个 agent 的 tiers 与当前档位；scraping/check_data 会按轮次调用 tier 切换（见 `multi_agents/agents/scraping.py`、`multi_agents/agents/check_data.py`）。
 - `gpt_researcher/config/config.py`：单体研究侧区分 fast/smart/strategic LLM，并支持 `REASONING_EFFORT` 等配置。
 - tracing：LangSmith 通过 `LANGCHAIN_TRACING_V2` 与 `LANGCHAIN_API_KEY`（见 `docs/docs/gpt-researcher/handling-logs/langsmith-logs.md`、`backend/server/server_utils.py`）。
 - evals：`evals/simple_evals`（短事实性回归）与 `evals/hallucination_eval`（长文对 sources 对照）（见 `evals/README.md`）。

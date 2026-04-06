@@ -16,6 +16,7 @@ from .storage.store import LayeredRoutingStore
 if TYPE_CHECKING:
     from .federation_adapter import FederationAdapter
     from .local_adapter import LocalOnlyAdapter
+    from .local_study_adapter import LocalStudyAdapter
 
 
 class RouteAgentClient:
@@ -28,7 +29,7 @@ class RouteAgentClient:
         "research": "research_agent",
         "researcher": "research_agent",
         "browser": "research_agent",
-        "scrap": "scrape_agent",
+        "scraping": "scrape_agent",
         "scrape": "scrape_agent",
         "scrape_agent": "scrape_agent",
         "check_data": "check_data_agent",
@@ -108,7 +109,17 @@ class RouteAgentClient:
         )
         self._federation: "FederationAdapter | None" = None
         self._local_full: "LocalOnlyAdapter | None" = None
-        if self.backend == "federation":
+        self._local_study: "LocalStudyAdapter | None" = None
+        if self.backend == "local_study":
+            from .local_study_adapter import LocalStudyAdapter
+            self._local_study = LocalStudyAdapter(
+                app_id=application_name,
+                project_path=external_project_path,
+                app_env_path=app_env_path,
+                local_db_path=federation_local_db,
+                router_db_path=federation_router_db,
+            )
+        elif self.backend == "federation":
             from .federation_adapter import FederationAdapter
             self._federation = FederationAdapter(
                 app_id=application_name,
@@ -138,6 +149,10 @@ class RouteAgentClient:
         return self._local_full is not None
 
     @property
+    def is_local_study(self) -> bool:
+        return self._local_study is not None
+
+    @property
     def federation(self) -> "FederationAdapter | None":
         return self._federation
 
@@ -146,16 +161,24 @@ class RouteAgentClient:
         return self._local_full
 
     @property
+    def local_study(self) -> "LocalStudyAdapter | None":
+        return self._local_study
+
+    @property
     def external_error(self) -> str:
         return self._external_error
 
     @property
     def external_bridge(self) -> ExternalRouteAgentBridge | None:
         """Expose the external bridge for runtime preflight and feedback hooks."""
+        if self._local_study is not None:
+            return self._local_study.bridge
         return self._external_bridge
 
     async def astart(self) -> None:
-        """Start async resources (federation / local_full background tasks)."""
+        """Start async resources (federation / local_full / local_study background tasks)."""
+        if self._local_study is not None:
+            await self._local_study.start()
         if self._federation is not None:
             await self._federation.start()
         if self._local_full is not None:
@@ -163,23 +186,27 @@ class RouteAgentClient:
 
     async def astop(self) -> None:
         """Stop async resources."""
+        if self._local_study is not None:
+            await self._local_study.stop()
         if self._federation is not None:
             await self._federation.stop()
         if self._local_full is not None:
             await self._local_full.stop()
 
     def route(self, request: RouteRequest) -> RouteDecision:
+        if self._local_study is not None:
+            return self._local_study.route(request)
         if self._external_bridge is not None:
             return self._external_bridge.route(request)
         return self._route_local(request)
 
     def record_quality_success(self, application_name: str, shared_agent_class: str, model_id: str) -> None:
-        if self._external_bridge is not None:
+        if self._external_bridge is not None or self._local_study is not None:
             return
         self.store.mark_success(application_name, shared_agent_class, model_id)
 
     def record_quality_failure(self, application_name: str, shared_agent_class: str, model_id: str) -> None:
-        if self._external_bridge is not None:
+        if self._external_bridge is not None or self._local_study is not None:
             return
         self.store.mark_quality_failure(application_name, shared_agent_class, model_id)
 
@@ -192,7 +219,7 @@ class RouteAgentClient:
         provider_failure: bool = False,
         unavailable: bool = False,
     ) -> None:
-        if self._external_bridge is not None:
+        if self._external_bridge is not None or self._local_study is not None:
             return
         self.store.mark_exec_failure(
             application_name,
@@ -203,6 +230,8 @@ class RouteAgentClient:
         )
 
     def start_execution_tracking(self, request: RouteRequest, decision: RouteDecision) -> str:
+        if self._local_study is not None:
+            return self._local_study.start_execution_tracking(request, decision)
         if self._external_bridge is None:
             return ""
         return self._external_bridge.start_execution_tracking(request, decision)
@@ -215,6 +244,13 @@ class RouteAgentClient:
         duration_ms: float,
         error_message: str | None = None,
     ) -> bool:
+        if self._local_study is not None:
+            return self._local_study.end_execution_tracking(
+                execution_id=execution_id,
+                status=status,
+                duration_ms=duration_ms,
+                error_message=error_message,
+            )
         if self._external_bridge is None:
             return False
         return self._external_bridge.end_execution_tracking(
@@ -225,11 +261,12 @@ class RouteAgentClient:
         )
 
     def describe_model_pool(self) -> List[Dict[str, str]]:
-        if self._external_bridge is not None:
+        bridge = self.external_bridge
+        if bridge is not None:
             try:
                 self._external_error = ""
                 if self._external_pool_cache is None:
-                    self._external_pool_cache = self._external_bridge.describe_global_pool()
+                    self._external_pool_cache = bridge.describe_global_pool()
                 return list(self._external_pool_cache)
             except Exception as exc:  # noqa: BLE001
                 self._external_error = str(exc)
@@ -248,6 +285,12 @@ class RouteAgentClient:
             )
         return entries
 
+    # Deprecated backend names → canonical replacement
+    _BACKEND_ALIASES: dict[str, str] = {
+        "external": "local_study",
+        "local_full": "local_study",
+    }
+
     def _resolve_backend(
         self,
         backend: str | None,
@@ -255,19 +298,43 @@ class RouteAgentClient:
         store: LayeredRoutingStore | None,
         model_pool: List[str] | None,
     ) -> str:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
         explicit = str(backend or "").strip().lower()
         if explicit:
-            return explicit
+            canonical = self._BACKEND_ALIASES.get(explicit, explicit)
+            if canonical != explicit:
+                _log.warning(
+                    "ROUTE_AGENT_BACKEND=%r is deprecated, using %r instead",
+                    explicit,
+                    canonical,
+                )
+            return canonical
         if store is not None or model_pool is not None:
             return "local"
         env_backend = str(os.getenv("ROUTE_AGENT_BACKEND") or "").strip().lower()
         if env_backend:
-            return env_backend
+            canonical = self._BACKEND_ALIASES.get(env_backend, env_backend)
+            if canonical != env_backend:
+                _log.warning(
+                    "ROUTE_AGENT_BACKEND=%r is deprecated, using %r instead",
+                    env_backend,
+                    canonical,
+                )
+            return canonical
         repo_env_path = Path(__file__).resolve().parents[2] / ".env"
         if repo_env_path.exists():
             file_backend = str(dotenv_values(repo_env_path).get("ROUTE_AGENT_BACKEND") or "").strip().lower()
             if file_backend:
-                return file_backend
+                canonical = self._BACKEND_ALIASES.get(file_backend, file_backend)
+                if canonical != file_backend:
+                    _log.warning(
+                        "ROUTE_AGENT_BACKEND=%r is deprecated, using %r instead",
+                        file_backend,
+                        canonical,
+                    )
+                return canonical
         return "local"
 
     def _resolve_model_pool(self, model_pool: List[str] | None) -> List[str]:
@@ -416,7 +483,7 @@ class RouteAgentClient:
             return "review_agent", "inferred"
         if "outline" in text or "plan" in text:
             return "planner_agent", "inferred"
-        if "scrap" in text or "scrape" in text or "evidence" in text:
+        if "scraping" in text or "scrape" in text or "evidence" in text:
             return "scrape_agent", "inferred"
         if "write" in text or "draft" in text:
             return "writer_agent", "inferred"

@@ -74,7 +74,7 @@ async def test_check_data_retry_when_constraints_missing(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {},
             "iteration_index": 1,
-            "scrap_packet": _packet_with_text("Forecast for 2025 suggests rapid growth projection."),
+            "scraping_packet": _packet_with_text("Forecast for 2025 suggests rapid growth projection."),
         }
     )
 
@@ -96,7 +96,7 @@ async def test_check_data_accept_when_claims_are_verified(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {},
             "iteration_index": 1,
-            "scrap_packet": _packet_with_text(
+            "scraping_packet": _packet_with_text(
                 "Nvidia reported actual audited AI GPU revenue in 2026 in its official filing."
             ),
         }
@@ -117,7 +117,7 @@ async def test_check_data_blocks_after_third_failed_attempt(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {},
             "iteration_index": 3,
-            "scrap_packet": _packet_with_text("Projection only. No audited actual value was found."),
+            "scraping_packet": _packet_with_text("Projection only. No audited actual value was found."),
         }
     )
 
@@ -136,7 +136,7 @@ async def test_retry_feedback_is_propagated_as_extra_hints(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {},
             "iteration_index": 1,
-            "scrap_packet": _packet_with_text("Prediction data from 2025 only."),
+            "scraping_packet": _packet_with_text("Prediction data from 2025 only."),
         }
     )
 
@@ -157,7 +157,7 @@ async def test_check_data_retries_when_coverage_below_threshold(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {"research_queries": ["nvidia 2026 ai gpu revenue audited"]},
             "iteration_index": 1,
-            "scrap_packet": _packet_with_coverage(
+            "scraping_packet": _packet_with_coverage(
                 text="Nvidia reported actual audited AI GPU revenue in 2026.",
                 section_coverage=0.4,
             ),
@@ -178,7 +178,7 @@ async def test_check_data_blocks_when_coverage_still_low_after_retry(tmp_path):
             "topic": "2026 Nvidia AI GPU revenue",
             "research_context": {"research_queries": ["nvidia 2026 ai gpu revenue audited"]},
             "iteration_index": 2,
-            "scrap_packet": _packet_with_coverage(
+            "scraping_packet": _packet_with_coverage(
                 text="Nvidia reported actual audited AI GPU revenue in 2026.",
                 section_coverage=0.5,
             ),

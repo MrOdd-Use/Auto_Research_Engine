@@ -52,6 +52,7 @@ async def write_report_introduction(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            route_context={"task": query, "system_prompt": agent_role_prompt},
             **kwargs
         )
         return introduction
@@ -104,6 +105,7 @@ async def write_conclusion(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            route_context={"task": query, "system_prompt": agent_role_prompt},
             **kwargs
         )
         return conclusion
@@ -149,6 +151,7 @@ async def summarize_url(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            route_context={"task": f"Summarize content from URL: {url}", "system_prompt": role},
             **kwargs
         )
         return summary
@@ -198,6 +201,7 @@ async def generate_draft_section_titles(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            route_context={"task": query, "system_prompt": role},
             **kwargs
         )
         return section_titles.split("\n")
@@ -285,6 +289,7 @@ Place each image on its own line after the relevant section header or paragraph.
             max_tokens=cfg.smart_token_limit,
             llm_kwargs=cfg.llm_kwargs,
             cost_callback=cost_callback,
+            route_context={"task": query, "system_prompt": agent_role_prompt},
             **kwargs
         )
     except:
@@ -301,6 +306,7 @@ Place each image on its own line after the relevant section header or paragraph.
                 max_tokens=cfg.smart_token_limit,
                 llm_kwargs=cfg.llm_kwargs,
                 cost_callback=cost_callback,
+                route_context={"task": query, "system_prompt": agent_role_prompt},
                 **kwargs
             )
         except Exception as e:

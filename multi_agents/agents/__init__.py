@@ -1,5 +1,5 @@
 from .researcher import ResearchAgent
-from .scrap import ScrapAgent
+from .scraping import ScrapingAgent
 from .check_data import CheckDataAgent
 from .claim_verifier import ClaimVerifierAgent
 from .writer import WriterAgent
@@ -15,7 +15,7 @@ from .orchestrator import ChiefEditorAgent
 __all__ = [
     "ChiefEditorAgent",
     "ResearchAgent",
-    "ScrapAgent",
+    "ScrapingAgent",
     "CheckDataAgent",
     "ClaimVerifierAgent",
     "WriterAgent",

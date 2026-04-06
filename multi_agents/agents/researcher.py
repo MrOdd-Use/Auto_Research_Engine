@@ -2,7 +2,7 @@ from gpt_researcher import GPTResearcher
 from colorama import Fore, Style
 from multi_agents.route_agent import build_route_scope, route_scope
 from .utils.views import print_agent_output
-from .scrap import ScrapAgent
+from .scraping import ScrapingAgent
 
 
 class ResearchAgent:
@@ -71,18 +71,18 @@ class ResearchAgent:
                                                           verbose=verbose, source=source, headers=self.headers)
         return {"draft": research_draft}
 
-    async def run_depth_scrap(self, draft_state: dict):
+    async def run_depth_scraping(self, draft_state: dict):
         """
         Compatibility bridge for legacy callsites that still use ResearchAgent.
-        Delegates to ScrapAgent when ASA flow is desired.
+        Delegates to ScrapingAgent when ASA flow is desired.
         """
-        scrap_agent = ScrapAgent(
+        scraping_agent = ScrapingAgent(
             websocket=self.websocket,
             stream_output=self.stream_output,
             tone=self.tone,
             headers=self.headers,
         )
-        return await scrap_agent.run_depth_scrap(draft_state)
+        return await scraping_agent.run_depth_scraping(draft_state)
 
     @staticmethod
     def _build_enriched_topic(topic: str, context: dict) -> str:

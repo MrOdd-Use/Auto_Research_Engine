@@ -116,6 +116,9 @@ class _FakeExternalBridge:
         )
         return list(self.results)
 
+    async def probe_global_pool_async(self, *, force=False, limit=None, mark_unavailable=True):
+        return self.probe_global_pool(force=force, limit=limit, mark_unavailable=mark_unavailable)
+
 
 class _FakeRuntimeContext:
     """Minimal runtime context double for escalation-path tests."""
@@ -153,11 +156,14 @@ class _FakeExternalClient:
     def __init__(self, *, decision: RouteDecision, bridge: _FakeExternalBridge):
         self.decision = decision
         self.external_bridge = bridge
+        self.backend = "local_study"
         self.is_external_backend = True
         self.is_federation = False
         self.is_local_full = False
+        self.is_local_study = False
         self.federation = None
         self.local_full = None
+        self.local_study = None
         self.started = []
         self.ended = []
 

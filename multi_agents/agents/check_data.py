@@ -8,7 +8,7 @@ from .utils.views import print_agent_output
 
 
 class CheckDataAgent:
-    """Check Data Agent: validates scrap passages and decides accept/retry/blocked."""
+    """Check Data Agent: validates scraping passages and decides accept/retry/blocked."""
 
     ROUND_TO_TIER = {
         1: 2,
@@ -51,7 +51,7 @@ class CheckDataAgent:
         task = draft_state.get("task") or {}
         topic = str(draft_state.get("topic") or "").strip() or "Main Research Focus"
         research_context = draft_state.get("research_context") or {}
-        scrap_packet = draft_state.get("scrap_packet") or {}
+        scraping_packet = draft_state.get("scraping_packet") or {}
         checkpoint_note = (
             str(task.get("checkpoint_note") or "").strip()
             if task.get("checkpoint_target") == "check_data"
@@ -59,7 +59,7 @@ class CheckDataAgent:
         )
         iteration_index = self._normalize_iteration(draft_state.get("iteration_index"))
         max_retries = self._normalize_max_retries(task.get("check_data_max_retries"))
-        coverage_report = self._build_coverage_report(scrap_packet, research_context)
+        coverage_report = self._build_coverage_report(scraping_packet, research_context)
         coverage_failed = float(coverage_report.get("section_coverage") or 0.0) < self.COVERAGE_THRESHOLD
 
         await self._emit_log(
@@ -71,10 +71,10 @@ class CheckDataAgent:
         self.state_controller.set_tier("check_data", tier_idx)
 
         try:
-            segments = self._extract_segments(scrap_packet)
+            segments = self._extract_segments(scraping_packet)
             claims = self._atomic_deconstruct(topic, research_context, checkpoint_note=checkpoint_note)
             precheck = self._constraint_guard(claims, segments)
-            deep_eval_report = self._run_deep_eval(claims, segments, precheck)
+            deep_eval_report = self._run_deep_eval(claims, segments, precheck, coverage_report)
 
             final_score = float(deep_eval_report.get("final_score") or 0.0)
             hard_fail = bool(precheck.get("hard_fail"))
@@ -181,9 +181,9 @@ class CheckDataAgent:
             parsed = self.DEFAULT_RETRY_BUDGET + 1
         return min(max(parsed, 1), self.MAX_RETRIES)
 
-    def _extract_segments(self, scrap_packet: dict) -> List[str]:
+    def _extract_segments(self, scraping_packet: dict) -> List[str]:
         segments: List[str] = []
-        for item in scrap_packet.get("search_log", []):
+        for item in scraping_packet.get("search_log", []):
             if not isinstance(item, dict):
                 continue
             for passage in item.get("top_10_passages", []):
@@ -298,7 +298,7 @@ class CheckDataAgent:
             "suspicious_reason": "projection_or_forecast_without_actual" if suspicious else "",
         }
 
-    def _run_deep_eval(self, claims: dict, segments: List[str], precheck: dict) -> dict:
+    def _run_deep_eval(self, claims: dict, segments: List[str], precheck: dict, coverage_report: dict = None) -> dict:
         required_claims = [x for x in [claims.get("subject"), claims.get("time_constraint"), claims.get("metric")] if x]
         corpus = " ".join(segments).lower()
         verified_claims = 0
@@ -313,8 +313,14 @@ class CheckDataAgent:
 
         total_required = len(required_claims)
         if total_required == 0:
-            final_score = 0.0
-            failed_claims.append("No required claims extracted.")
+            # No structural claims extracted (e.g. pure Chinese topic with no year/metric).
+            # Fall back to section_coverage so the agent doesn't hard-penalize valid content.
+            section_cov = float((coverage_report or {}).get("section_coverage") or 0.0)
+            final_score = round(section_cov, 4)
+            if final_score == 0.0:
+                failed_claims.append("No required claims extracted and coverage is zero.")
+            else:
+                failed_claims.append("No required claims extracted; score derived from section coverage.")
         else:
             final_score = verified_claims / total_required
 
@@ -452,8 +458,8 @@ class CheckDataAgent:
         words = max(len(corpus.split()), 1)
         return round((occurrences / words) * 100, 4)
 
-    def _build_coverage_report(self, scrap_packet: dict, research_context: dict) -> dict:
-        snapshot = scrap_packet.get("coverage_snapshot")
+    def _build_coverage_report(self, scraping_packet: dict, research_context: dict) -> dict:
+        snapshot = scraping_packet.get("coverage_snapshot")
         if isinstance(snapshot, dict):
             query_coverage = float(snapshot.get("query_coverage") or 0.0)
             keypoint_coverage = float(snapshot.get("keypoint_coverage") or 0.0)
@@ -483,7 +489,7 @@ class CheckDataAgent:
             for item in (research_context.get("key_points") or [])
             if str(item or "").strip()
         ]
-        search_log = scrap_packet.get("search_log") or []
+        search_log = scraping_packet.get("search_log") or []
         covered_queries_set = set()
         corpus = []
         for row in search_log:

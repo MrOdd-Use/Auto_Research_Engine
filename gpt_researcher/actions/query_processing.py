@@ -68,6 +68,8 @@ async def generate_sub_queries(
         context=context,
     )
 
+    _system_prompt = gen_queries_prompt.split("\nContext:")[0].strip()
+    _route_ctx = {"task": query, "system_prompt": _system_prompt}
     try:
         response = await create_chat_completion(
             model=cfg.strategic_llm_model,
@@ -77,6 +79,7 @@ async def generate_sub_queries(
             llm_kwargs=cfg.llm_kwargs,
             reasoning_effort=ReasoningEfforts.Medium.value,
             cost_callback=cost_callback,
+            route_context=_route_ctx,
             **kwargs
         )
     except Exception as e:
@@ -90,6 +93,7 @@ async def generate_sub_queries(
                 llm_provider=cfg.strategic_llm_provider,
                 llm_kwargs=cfg.llm_kwargs,
                 cost_callback=cost_callback,
+                route_context=_route_ctx,
                 **kwargs
             )
             logger.warning(f"Retrying with max_tokens={cfg.strategic_token_limit} successful.")
@@ -104,6 +108,7 @@ async def generate_sub_queries(
                 llm_provider=cfg.smart_llm_provider,
                 llm_kwargs=cfg.llm_kwargs,
                 cost_callback=cost_callback,
+                route_context=_route_ctx,
                 **kwargs
             )
 

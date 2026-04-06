@@ -21,7 +21,18 @@ class BeautifulSoupScraper:
         occurs during the process, an error message is printed and an empty string is returned.
         """
         try:
-            response = self.session.get(self.link, timeout=4)
+            response = self.session.get(
+                self.link,
+                timeout=8,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                },
+            )
             soup = BeautifulSoup(
                 response.content, "lxml", from_encoding=response.encoding
             )

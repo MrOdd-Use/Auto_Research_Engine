@@ -44,12 +44,12 @@ class _ReflexionEditor:
             }
         )
         research_data = list(state.get("research_data") or [])
-        scrap_packets = list(state.get("scrap_packets") or [])
+        scraping_packets = list(state.get("scraping_packets") or [])
         check_data_reports = list(state.get("check_data_reports") or [])
 
         if selected_section_key == self.section_a_key:
             research_data[0] = {"Section A": "updated evidence"}
-            scrap_packets[0] = _make_packet(
+            scraping_packets[0] = _make_packet(
                 [
                     ("Section A metric is 23% actual", "https://c.com/evidence"),
                     ("Section A metric is 23% verified", "https://d.com/evidence"),
@@ -59,7 +59,7 @@ class _ReflexionEditor:
 
         return {
             "research_data": research_data,
-            "scrap_packets": scrap_packets,
+            "scraping_packets": scraping_packets,
             "check_data_reports": check_data_reports,
         }
 
@@ -124,7 +124,7 @@ async def test_claim_review_reruns_section_then_rewrites_with_new_sources():
             {"Section A": "old evidence"},
             {"Section B": "unchanged"},
         ],
-        "scrap_packets": [
+        "scraping_packets": [
             _make_packet(
                 [
                     ("Section A metric is 23%", "https://a.com/evidence"),

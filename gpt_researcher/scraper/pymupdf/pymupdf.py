@@ -41,7 +41,8 @@ class PyMuPDFScraper:
         """
         try:
             if self.is_url():
-                response = requests.get(self.link, timeout=5, stream=True)
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; GPTResearcher/1.0)"}
+                response = requests.get(self.link, timeout=30, stream=True, headers=headers)
                 response.raise_for_status()
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -57,10 +58,13 @@ class PyMuPDFScraper:
                 loader = PyMuPDFLoader(self.link)
                 doc = loader.load()
 
-            # Extract the content, image (if any), and title from the document.
-            image = []
-            # Retrieve the content of the first page to minimize embedding costs.
-            return doc[0].page_content, image, doc[0].metadata["title"]
+            if not doc:
+                return "", [], ""
+
+            # Extract content from all pages, title from first page metadata.
+            content = "\n".join(page.page_content for page in doc)
+            title = doc[0].metadata.get("title", "")
+            return content, [], title
 
         except requests.exceptions.Timeout:
             print(f"Download timed out. Please check the link : {self.link}")

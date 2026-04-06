@@ -111,13 +111,15 @@ class TavilySearch:
                 max_results=max_results,
                 topic=self.topic,
                 include_domains=self.query_domains,
+                include_raw_content=True,
             )
             sources = results.get("results", [])
             if not sources:
                 raise Exception("No results found with Tavily API search.")
-            # Return the results
+            # Return the results; prefer full raw_content over snippet
             search_response = [
-                {"href": obj["url"], "body": obj["content"]} for obj in sources
+                {"href": obj["url"], "body": obj.get("raw_content") or obj["content"]}
+                for obj in sources
             ]
         except Exception as e:
             print(f"Error: {e}. Failed fetching sources. Resulting in empty response.")

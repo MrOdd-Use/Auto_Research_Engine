@@ -1,4 +1,4 @@
-﻿# 研究采集与抓取
+# 研究采集与抓取
 
 > 覆盖题号：Q08, Q09, Q10, Q11, Q12, Q15, Q25, Q26, Q26a, Q31
 
@@ -21,7 +21,7 @@
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：Web 证据路径是“检索→抓取→片段选择→写作”，ASA 流在 scrap 模块内完成多引擎检索、URL 去重、抓取物化与 MMR 选片（见 `multi_agents/agents/scrap.py`）；写作阶段要求输出带链接与 sources 列表（见 `multi_agents/agents/writer.py`）。
+- 实现：Web 证据路径是“检索→抓取→片段选择→写作”，ASA 流在 scraping 模块内完成多引擎检索、URL 去重、抓取物化与 MMR 选片（见 `multi_agents/agents/scraping.py`）；写作阶段要求输出带链接与 sources 列表（见 `multi_agents/agents/writer.py`）。
 - 为什么：RAG/Tool-use 的核心不是“有链接”，而是让关键断言尽量落到可追溯证据片段，并在证据不足时触发回流或降级。
 - 利弊：利是显著降低“想当然”；弊是依赖抓取质量与网页可访问性，且当前实现仍是段落级/启发式门禁，非严格断言级对齐。
 
@@ -58,10 +58,10 @@
 - 去重过强可能误杀“同域不同页面”；需要粒度控制（优化）。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：scrap 模块对 URL 做归一化（去 fragment、排序 query 参数、去尾部斜杠）再去重，并用归一化 key 把抓取结果对齐回搜索结果（见 `multi_agents/agents/scrap.py` 的 URL 归一化与去重流程）。
+- 实现：scraping 模块对 URL 做归一化（去 fragment、排序 query 参数、去尾部斜杠）再去重，并用归一化 key 把抓取结果对齐回搜索结果（见 `multi_agents/agents/scraping.py` 的 URL 归一化与去重流程）。
 - 为什么：避免重复抓取/重复证据造成上下文同质化，进而让写作偏向单一来源。
 - 利弊：利是节省抓取预算并提升多样性；弊是归一化过强可能把“语义不同但 URL 相近”的页面合并，需要按站点特征做例外规则（可选升级）。
 
@@ -138,10 +138,10 @@
 - 面试官会追问相似度计算与参数选择；要讲清当前实现与升级路径。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：MMR 在 scrap 模块内优先用 embedding 向量做余弦相似度做“相关性 - 多样性惩罚”的迭代选 top-k；若 embedding 不可用/超时则回退到轻量词袋计数向量（见 `multi_agents/agents/scrap.py`）。
+- 实现：MMR 在 scraping 模块内优先用 embedding 向量做余弦相似度做“相关性 - 多样性惩罚”的迭代选 top-k；若 embedding 不可用/超时则回退到轻量词袋计数向量（见 `multi_agents/agents/scraping.py`）。
 - 为什么：在有限上下文预算里，既要相关又要避免同质片段堆叠，提高信息增益。
 - 利弊：embedding 语义更强但有成本/依赖/失败风险；词袋回退便宜快且更稳，但会忽略同义改写与跨语表达。
 
@@ -177,11 +177,11 @@
 - 迭代依据要能落到“校验反馈/置信度/失败类型”等信号。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - multi_agents/agents/check_data.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：ASA 通过“目标分解（每轮 2-4 个 search targets）→多引擎检索→垂直引擎失败回退→URL 去重→抓取物化→MMR 选片”多轮执行，轮次数由 `audit_feedback` 置信度驱动并受 `scrap_max_iterations` 上限控制（见 `multi_agents/agents/scrap.py`）。
+- 实现：ASA 通过“目标分解（每轮 2-4 个 search targets）→多引擎检索→垂直引擎失败回退→URL 去重→抓取物化→MMR 选片”多轮执行，轮次数由 `audit_feedback` 置信度驱动并受 `scraping_max_iterations` 上限控制（见 `multi_agents/agents/scraping.py`）。
 - 为什么：单轮检索常被 SEO 噪声/单一来源/口径不对带偏；多轮允许根据缺口调整约束与引擎组合。
 - 利弊：利是覆盖与证据质量提升；弊是成本/时延增加且有收益递减，需要停止条件与缓存（可选升级）。
 
@@ -217,12 +217,12 @@
 - 面试官会追问“如何避免丢关键证据”；要强调多样性与覆盖策略。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - gpt_researcher/skills/context_manager.py
 - gpt_researcher/memory/embeddings.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：上下文压缩使用“切分→embedding 相似度过滤→返回 top chunks”的压缩检索链，阈值由 `SIMILARITY_THRESHOLD` 控制（见 `gpt_researcher/context/compression.py`）；ASA 侧用 MMR 选片提升证据密度（见 `multi_agents/agents/scrap.py`）。
+- 实现：上下文压缩使用“切分→embedding 相似度过滤→返回 top chunks”的压缩检索链，阈值由 `SIMILARITY_THRESHOLD` 控制（见 `gpt_researcher/context/compression.py`）；ASA 侧用 MMR 选片提升证据密度（见 `multi_agents/agents/scraping.py`）。
 - 为什么：Web 抓取内容噪声大且 token 预算有限，需要把上下文变成“高密度证据片段”。
 - 利弊：利是更省 token、降低噪声；弊是压缩可能误删关键反证/限定条件，需要在评测与回归集中覆盖失败样本。
 
@@ -258,11 +258,11 @@
 - 参数（目标数、top-k）是工程折中，面试要能解释为可调。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - gpt_researcher/actions/web_scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：ASA 的关键策略在 scrap 模块：每轮把章节主题分解成 2-4 个独立 targets（JSON list），按轮次选择引擎（首轮 tavily，后续按域选引擎），垂直引擎失败回退到 google/bing，随后去重→抓取→构建 passages→MMR 选 top 片段，形成 `scrap_packet.search_log`（见 `multi_agents/agents/scrap.py`）。
+- 实现：ASA 的关键策略在 scraping 模块：每轮把章节主题分解成 2-4 个独立 targets（JSON list），按轮次选择引擎（首轮 tavily，后续按域选引擎），垂直引擎失败回退到 google/bing，随后去重→抓取→构建 passages→MMR 选 top 片段，形成 `scraping_packet.search_log`（见 `multi_agents/agents/scraping.py`）。
 - 补充：什么是「垂直引擎失败回退」？指 arxiv / semantic_scholar / pubmed_central 这类领域引擎在“调用失败/不可用”时，自动用通用引擎（google/bing）对同一 target 再检索以兜底覆盖；注意当前实现按“failed=True”触发（并非仅因结果为空就回退）。
 - 为什么：把“搜什么”从单 query 扩展成可控的目标集合，并用回退与重排提升覆盖/多样性。
 - 利弊：利是鲁棒性更好；弊是对 prompt/引擎配置更敏感，需要限流、缓存与失败类型分流（可选升级）。
@@ -299,10 +299,10 @@
 - 面试官会指出同义词问题；要主动给出升级方案。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：MMR 优先用 embedding 向量做余弦相似度；若 embedding 初始化/调用失败或超时，则回退到词袋计数向量 + 余弦相似度，并用时间预算限制最坏延迟（见 `multi_agents/agents/scrap.py`）。
+- 实现：MMR 优先用 embedding 向量做余弦相似度；若 embedding 初始化/调用失败或超时，则回退到词袋计数向量 + 余弦相似度，并用时间预算限制最坏延迟（见 `multi_agents/agents/scraping.py`）。
 - 为什么：embedding 提升语义匹配与多样性质量；回退确保在缺配置/限流/超时时流程仍可继续。
 - 利弊：embedding 更准但有成本与依赖；回退更稳更便宜但语义弱。
 
@@ -345,7 +345,7 @@
 - 只讲 embedding 不讲成本/超时/限流；要说清楚降级策略与延迟上界。
 
 **相关模块（对应实现）：**
-- multi_agents/agents/scrap.py（搜索→去重→抓取物化→passage 构建→MMR 重排）
+- multi_agents/agents/scraping.py（搜索→去重→抓取物化→passage 构建→MMR 重排）
 - gpt_researcher/scraper/（多种抓取后端：静态/浏览器/PDF 等）
 - gpt_researcher/context/compression.py（chunk 切分 + embedding 相似度过滤的上下文压缩）
 
@@ -377,10 +377,10 @@
 **相关模块（对应实现）：**
 - gpt_researcher/actions/web_scraping.py
 - gpt_researcher/scraper/
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现（当前仓库可辩护口径）：主要通过多引擎覆盖、URL 去重、MMR 多样性选择与证据门禁来间接降低被单一来源/噪声带偏的概率（见 `multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`）。
+- 实现（当前仓库可辩护口径）：主要通过多引擎覆盖、URL 去重、MMR 多样性选择与证据门禁来间接降低被单一来源/噪声带偏的概率（见 `multi_agents/agents/scraping.py`、`multi_agents/agents/check_data.py`）。
 - 为什么：Web 场景天然存在 SEO 垃圾与诱导文本；系统需要“来源多样性 + 证据约束”作为基础防线。
 - 利弊：利是成本较低且对多数噪声有效；弊是对 prompt injection 这类“内容级攻击”缺少显式防护（例如指令剥离、可疑片段过滤、allowlist/denylist、沙箱化渲染），生产级需要加固（可选升级）。
 
@@ -410,9 +410,9 @@
 **一句话结论：** 每轮先拆 2-4 个独立 targets，再多引擎检索→去重→抓取→MMR 选片；轮次数由 `audit_feedback` 置信度驱动并受上限约束。
 
 **实现落点：**
-- `multi_agents/agents/scrap.py`：targets 数量为 2-4（JSON list），首轮引擎默认 `tavily`，后续按 domain 选择引擎组合；垂直引擎失败回退到 `google/bing`。
-- 轮次数：当 `audit_feedback.is_satisfied` 为 false 且 `confidence_score` 低于阈值会规划更多轮（最多 3 轮，见 `scrap_max_iterations` 上限逻辑）。
-- `tests/test_scrap_agent.py`：覆盖“首轮只用 tavily”“第 2 轮按 domain 路由到 arxiv/semantic_scholar/google”“垂直引擎失败回退”。
+- `multi_agents/agents/scraping.py`：targets 数量为 2-4（JSON list），首轮引擎默认 `tavily`，后续按 domain 选择引擎组合；垂直引擎失败回退到 `google/bing`。
+- 轮次数：当 `audit_feedback.is_satisfied` 为 false 且 `confidence_score` 低于阈值会规划更多轮（最多 3 轮，见 `scraping_max_iterations` 上限逻辑）。
+- `tests/test_scraping_agent.py`：覆盖“首轮只用 tavily”“第 2 轮按 domain 路由到 arxiv/semantic_scholar/google”“垂直引擎失败回退”。
 
 **对照题库：** Q12/Q25（ASA 策略）
 
@@ -429,15 +429,15 @@
 - 弊：成本/时延上升；需要停止条件与缓存（缓存为可选升级）。
 
 **如何验证：**
-- 跑 `tests/test_scrap_agent.py` 看引擎路由与回退是否符合预期。
+- 跑 `tests/test_scraping_agent.py` 看引擎路由与回退是否符合预期。
 
 ### 7) URL 归一化去重怎么做？为什么能减少系统性偏差？
 **一句话结论：** 先把“同页多 URL”归一化成稳定 key，再去重与对齐抓取结果，避免重复证据污染上下文。
 
 **实现落点：**
-- `multi_agents/agents/scrap.py`：URL 归一化规则：去 fragment、query 参数排序、去尾部斜杠、空 path 归 `/`；以归一化后的 URL 作为 dedupe key。
+- `multi_agents/agents/scraping.py`：URL 归一化规则：去 fragment、query 参数排序、去尾部斜杠、空 path 归 `/`；以归一化后的 URL 作为 dedupe key。
 - 去重发生在“抓取物化之前”，减少重复抓取与重复片段进入 MMR。
-- `tests/test_scrap_agent.py`：`test_url_set_union_dedup` 覆盖不同参数顺序/尾斜杠的去重结果。
+- `tests/test_scraping_agent.py`：`test_url_set_union_dedup` 覆盖不同参数顺序/尾斜杠的去重结果。
 
 **为什么这样设计：**
 - 重复抓取会导致证据片段高度同质，MMR 与写作会被单一来源“绑架”，形成系统性偏差。
@@ -453,17 +453,17 @@
 - 抓取失败 fallback：`raw_content` 为空会被丢弃（即使搜索摘要 `body` 有内容），可能降低 recall；可选升级：保留 snippet 兜底并标注可信度（未实现）。
 
 **如何验证：**
-- `tests/test_scrap_agent.py` 的 URL 去重用例可直接回归。
+- `tests/test_scraping_agent.py` 的 URL 去重用例可直接回归。
 
 ### 8) MMR 的实现细节（向量/相似度/lambda/top_k/time budget）与取舍？
 **一句话结论：** 证据片段重排采用“双路径 MMR”：优先走 embedding-MMR（更语义，受 time budget 与候选裁剪控制），失败/超时自动降级到词袋（BOW）MMR，确保在线链路稳定输出 top-10 多样且相关的片段。
 
 **实现落点：**
-- `multi_agents/agents/scrap.py`：MMR 重排入口默认 `top_k=10`、`lambda_param=0.7`、`time_budget_s=5.0`；当 `SCRAP_MMR_USE_EMBEDDINGS` 启用时，优先尝试 embedding-MMR，成功就直接返回。
-- embedding-MMR 路径（可选）：会把总时间预算 `time_budget_s` 换算成“剩余时间”并用 `asyncio.wait_for(..., timeout=remaining)` 包住 embedding 调用；当 passages 过多时，用 `SCRAP_MMR_MAX_EMBED_PASSAGES`（默认 80）先基于轻量相关性粗排截断候选，再对候选做 embedding-MMR 精排。
+- `multi_agents/agents/scraping.py`：MMR 重排入口默认 `top_k=10`、`lambda_param=0.7`、`time_budget_s=5.0`；当 `SCRAPING_MMR_USE_EMBEDDINGS` 启用时，优先尝试 embedding-MMR，成功就直接返回。
+- embedding-MMR 路径（可选）：会把总时间预算 `time_budget_s` 换算成“剩余时间”并用 `asyncio.wait_for(..., timeout=remaining)` 包住 embedding 调用；当 passages 过多时，用 `SCRAPING_MMR_MAX_EMBED_PASSAGES`（默认 80）先基于轻量相关性粗排截断候选，再对候选做 embedding-MMR 精排。
 - 自动降级策略：embedding 初始化缺配置（embedding provider/model）或 embedding 调用异常/超时，会在本进程内关闭 embedding-MMR 路径并记录错误，后续直接走 BOW-MMR，避免反复失败拖慢热路径。
 - BOW-MMR 路径（兜底）：向量为词袋计数（英文 token + 中文单字），相似度为余弦；按 MMR 贪心策略在“相关性 vs 多样性”间折中选 top-k。若循环超过 `time_budget_s`，回退到“按相关性补齐”的兜底排序，防止在线链路卡死。
-- `tests/test_scrap_agent.py`：`test_passage_mmr_top10_diversity` 覆盖 top-10 多样性结果（不重复 content）。
+- `tests/test_scraping_agent.py`：`test_passage_mmr_top10_diversity` 覆盖 top-10 多样性结果（不重复 content）。
 
 **为什么这样设计：**
 - 证据选择是热路径：embedding-MMR 在同义改写/跨语言场景更鲁棒，但成本更高且依赖 embedding 配置/调用稳定性；因此采用“能用则用 embedding，不能用就退回词袋”的分层策略，把语义收益与工程稳定性同时兼顾。
@@ -481,4 +481,4 @@
   - hallucination 对齐分：长文输出与 source text 的对齐式评估（`evals/hallucination_eval`）。
 
 **如何验证：**
-- 跑 `tests/test_scrap_agent.py` 的 MMR 用例，保证输出规模与多样性契约不回退。
+- 跑 `tests/test_scraping_agent.py` 的 MMR 用例，保证输出规模与多样性契约不回退。

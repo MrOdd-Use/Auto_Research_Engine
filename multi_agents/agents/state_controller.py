@@ -10,7 +10,7 @@ DEFAULT_AGENT_STATES: Dict[str, Dict[str, Any]] = {
         "current_idx": 3,
         "tiers": ["o1-preview", "gpt-4o", "gpt-4o-mini", "gpt-4o-mini"],
     },
-    "scrap": {
+    "scraping": {
         "current_idx": 3,
         "tiers": ["o1-preview", "o1-preview", "gpt-4o", "gpt-4o-mini"],
     },

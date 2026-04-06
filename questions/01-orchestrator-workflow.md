@@ -1,4 +1,4 @@
-﻿# 编排与工作流
+# 编排与工作流
 
 > 覆盖题号：Q01, Q02, Q03, Q04, Q05, Q06, Q14, Q16, Q22, Q23, Q24, Q29, Q35
 
@@ -140,7 +140,7 @@
 - multi_agents/memory/research.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：链路节点在 `multi_agents/agents/orchestrator.py` 明确：初始研究写入 `initial_research`；规划写入 `section_details`；并行深研聚合 `research_data/scrap_packets/check_data_reports`；写作生成 `introduction/conclusion/table_of_contents/sources/claim_annotations`；ClaimVerifier 生成 `source_index/indexed_research_data/claim_confidence_report` 并在 `SUSPICIOUS` 场景下触发章节级 rerun；审阅/修订产出 `final_draft`；发布落到 `report` 与多格式文件（见 `multi_agents/agents/publisher.py`）。
+- 实现：链路节点在 `multi_agents/agents/orchestrator.py` 明确：初始研究写入 `initial_research`；规划写入 `section_details`；并行深研聚合 `research_data/scraping_packets/check_data_reports`；写作生成 `introduction/conclusion/table_of_contents/sources/claim_annotations`；ClaimVerifier 生成 `source_index/indexed_research_data/claim_confidence_report` 并在 `SUSPICIOUS` 场景下触发章节级 rerun；审阅/修订产出 `final_draft`；发布落到 `report` 与多格式文件（见 `multi_agents/agents/publisher.py`）。
 - 为什么：把“方向对齐（大纲）”放在前面，把“内容打磨（Reviewer–Reviser）”放在后面，避免在错误方向上堆成本。
 - 利弊：利是每段输入输出可解释、可复用；弊是步骤变多，端到端时延更长，且每段的失败需要降级/兜底策略。
 
@@ -153,8 +153,8 @@
 
 **实现：** state 在链路里如何演进？  
 答题要点：LangGraph 节点通常只返回“增量 dict”，运行时按 key 合并进 state；因此 state 是“逐步累积 + 覆盖更新”的。
-- 全局用 `ResearchState`（见 `multi_agents/memory/research.py`）：入口只有 `task`，随后依次写入 `initial_research` → `sections/section_details/title/date` → `human_feedback`（有反馈回流） → `research_data/scrap_packets/check_data_reports`（并行聚合） → `source_index/indexed_research_data/introduction/conclusion/table_of_contents/sources/claim_annotations/headers` → `claim_confidence_report/claim_reflexion_iterations` → `review/final_draft/review_iterations` → `report`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/publisher.py`）。
-- 章节级用 `DraftState`（见 `multi_agents/memory/draft.py`）：每章携带 `research_context/extra_hints/audit_feedback/iteration_index`；研究节点产出 `draft/scrap_packet`，Check Data 写入 `check_data_action/check_data_verdict` 并在 `retry` 时更新 `iteration_index/extra_hints`，驱动下一轮补证据；`accept` 时不覆盖 `draft`，保留上一轮产物（见 `multi_agents/agents/editor.py`、`multi_agents/agents/check_data.py`）。
+- 全局用 `ResearchState`（见 `multi_agents/memory/research.py`）：入口只有 `task`，随后依次写入 `initial_research` → `sections/section_details/title/date` → `human_feedback`（有反馈回流） → `research_data/scraping_packets/check_data_reports`（并行聚合） → `source_index/indexed_research_data/introduction/conclusion/table_of_contents/sources/claim_annotations/headers` → `claim_confidence_report/claim_reflexion_iterations` → `review/final_draft/review_iterations` → `report`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/publisher.py`）。
+- 章节级用 `DraftState`（见 `multi_agents/memory/draft.py`）：每章携带 `research_context/extra_hints/audit_feedback/iteration_index`；研究节点产出 `draft/scraping_packet`，Check Data 写入 `check_data_action/check_data_verdict` 并在 `retry` 时更新 `iteration_index/extra_hints`，驱动下一轮补证据；`accept` 时不覆盖 `draft`，保留上一轮产物（见 `multi_agents/agents/editor.py`、`multi_agents/agents/check_data.py`）。
 - 条件路由只看少数“信号字段”：全局主要是 `human_feedback`、`review`、`review_iterations`；章节主要是 `check_data_action`（见 `multi_agents/agents/orchestrator.py`、`multi_agents/agents/editor.py`）。
 
 **边界：** 哪些输入会导致链路天然不稳定？  
@@ -309,7 +309,7 @@
 - multi_agents/agents/reviser.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：规划/写作等关键节点使用 `response_format="json"` 强制结构化输出，并用 `json_repair`/JSON 解析器做容错（见 `multi_agents/agents/utils/llms.py`、`multi_agents/agents/editor.py`、`multi_agents/agents/writer.py`、`multi_agents/agents/scrap.py`）。
+- 实现：规划/写作等关键节点使用 `response_format="json"` 强制结构化输出，并用 `json_repair`/JSON 解析器做容错（见 `multi_agents/agents/utils/llms.py`、`multi_agents/agents/editor.py`、`multi_agents/agents/writer.py`、`multi_agents/agents/scraping.py`）。
 - 为什么：链路是程序编排，不稳定的自然语言输出会导致解析失败、字段缺失与路由不可控。
 - 利弊：利是可消费、可校验、可回放；弊是过强格式约束会降低表达自由度，且仍需要降级策略处理“半合规 JSON”。
 
@@ -419,9 +419,9 @@
 ### Q24（复杂）：分章节并行深研如何组织结果聚合？失败如何降级？
 
 **标准答案（可直接说）：**
-一句话：以“章节”为并行单位，每章携带规划上下文独立深研，产出章节草稿与证据/校验信息；最终聚合到 `ResearchState` 的 `research_data/scrap_packets/check_data_reports` 等字段。
+一句话：以“章节”为并行单位，每章携带规划上下文独立深研，产出章节草稿与证据/校验信息；最终聚合到 `ResearchState` 的 `research_data/scraping_packets/check_data_reports` 等字段。
 
-展开：规划阶段产出 `section_details`（描述/关键点/研究查询），深研阶段为每章构造独立输入并执行采集与写作草稿，形成章节级结果。聚合时把章节草稿列表写入 `research_data`，证据包写入 `scrap_packets`，校验报告写入 `check_data_reports`，便于 Writer 汇编与后续审阅。降级方面，当缺少结构化章节详情时可退化为扁平章节列表并补齐默认字段；当单章失败可返回缺省或占位，避免整体链路中断（具体边界以实现为准）。
+展开：规划阶段产出 `section_details`（描述/关键点/研究查询），深研阶段为每章构造独立输入并执行采集与写作草稿，形成章节级结果。聚合时把章节草稿列表写入 `research_data`，证据包写入 `scraping_packets`，校验报告写入 `check_data_reports`，便于 Writer 汇编与后续审阅。降级方面，当缺少结构化章节详情时可退化为扁平章节列表并补齐默认字段；当单章失败可返回缺省或占位，避免整体链路中断（具体边界以实现为准）。
 
 常见坑/反杀点：
 - 并行可能导致重复与冲突；要讲规划边界、去重与终稿一致性兜底。
@@ -432,7 +432,7 @@
 - multi_agents/memory/research.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：以章节为并行单位，把 `section_details` 注入每章 `DraftState.research_context`，并行跑研究/校验闭环后，将 `draft/scrap_packet/check_data_verdict` 聚合回 `ResearchState` 的 `research_data/scrap_packets/check_data_reports`（见 `multi_agents/agents/editor.py`、`multi_agents/memory/*`）。
+- 实现：以章节为并行单位，把 `section_details` 注入每章 `DraftState.research_context`，并行跑研究/校验闭环后，将 `draft/scraping_packet/check_data_verdict` 聚合回 `ResearchState` 的 `research_data/scraping_packets/check_data_reports`（见 `multi_agents/agents/editor.py`、`multi_agents/memory/*`）。
 - 为什么：章节边界清晰，天然适合并行；聚合字段也方便 Writer/Reviewer 消费。
 - 利弊：利是吞吐高；弊是会引入跨章节重复与结论冲突，通常需要跨章去重与一致性检查（可选升级）。
 
@@ -510,7 +510,7 @@
 **相关模块（对应实现）：**
 - multi_agents/agents/orchestrator.py
 - multi_agents/agents/editor.py
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - evals/README.md
 
 **技术细节（实现 / 为什么 / 利弊）：**
@@ -543,7 +543,7 @@
 
 **实现落点：**
 - `multi_agents/agents/orchestrator.py`：全局用 LangGraph 状态图编排 browser→planner→human→researcher→writer→reviewer/reviser→publisher；关键路由读 `human_feedback`、`review`、`review_iterations`。
-- `multi_agents/memory/research.py`：端到端状态承载 `initial_research/section_details/research_data/scrap_packets/check_data_reports/final_draft/report` 等产物。
+- `multi_agents/memory/research.py`：端到端状态承载 `initial_research/section_details/research_data/scraping_packets/check_data_reports/final_draft/report` 等产物。
 
 **为什么这样设计：**
 - while/if 的问题是“回流”与“插拔”会把控制流写成面条；状态图能把每个决策点（HITL、审阅接受/修订、发布）工程化。
@@ -615,9 +615,9 @@
 **一句话结论：** 章节天然是交付结构；并行后把“草稿+证据+门禁结论”聚合回全局，供写作与终稿审阅消费。
 
 **实现落点：**
-- `multi_agents/agents/editor.py`：按 `section_details` 构造每章输入（topic + research_context），并行执行后聚合 `research_data/scrap_packets/check_data_reports`。
+- `multi_agents/agents/editor.py`：按 `section_details` 构造每章输入（topic + research_context），并行执行后聚合 `research_data/scraping_packets/check_data_reports`。
 - `multi_agents/memory/research.py`：聚合字段在全局 state 中有固定位置，Writer/Publisher 直接消费。
-- `tests/test_editor_planner.py`：有用例覆盖“空章节列表时退化为 1 章”与聚合 scrap/check_data 报告。
+- `tests/test_editor_planner.py`：有用例覆盖“空章节列表时退化为 1 章”与聚合 scraping/check_data 报告。
 
 **为什么这样设计：**
 - 如果按“搜索目标”并行，会把写作切得过碎，最终还要做大规模重组；章节并行更贴近最终报告结构。
@@ -627,7 +627,7 @@
 - 弊：跨章重复与冲突更常见，需要终稿阶段做一致性兜底（可选升级：跨章去重/冲突检测）。
 
 **如何验证：**
-- `tests/test_editor_planner.py` 的并行 research 聚合用例能验证 `scrap_packets/check_data_reports` 的聚合契约。
+- `tests/test_editor_planner.py` 的并行 research 聚合用例能验证 `scraping_packets/check_data_reports` 的聚合契约。
 
 ### 11) Reviewer–Reviser、ClaimVerifier、Check Data 怎么分工？“上限 3 轮”如何实现与计数？
 **一句话结论：** Check Data 管章节证据门禁，ClaimVerifier 管 Writer 断言级引用与冲突校验，Reviewer–Reviser 管终稿可发布性与 source-aware 修订审查；终稿修订用 `review_iterations/max_review_rounds` 做硬上限。

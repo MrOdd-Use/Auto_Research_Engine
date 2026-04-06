@@ -32,7 +32,7 @@ class ClaimVerifierAgent:
 
     def build_source_index(
         self,
-        scrap_packets: List[dict],
+        scraping_packets: List[dict],
         start_id: int = 1,
         section_contexts: Optional[List[dict]] = None,
         existing_index: Optional[dict] = None,
@@ -40,9 +40,9 @@ class ClaimVerifierAgent:
         """Assign [S1], [S2]... to each evidence passage.
 
         Args:
-            scrap_packets: List of scrap packet dicts with search_log.
+            scraping_packets: List of scraping packet dicts with search_log.
             start_id: Starting ID number (for append-only rebuilds).
-            section_contexts: Optional section metadata aligned with scrap_packets.
+            section_contexts: Optional section metadata aligned with scraping_packets.
             existing_index: Existing source index used to skip duplicate append-only entries.
 
         Returns:
@@ -55,7 +55,7 @@ class ClaimVerifierAgent:
         seen_fingerprints = self._collect_existing_fingerprints(existing_index)
         normalized_contexts = list(section_contexts or [])
 
-        for packet_idx, packet in enumerate(scrap_packets or []):
+        for packet_idx, packet in enumerate(scraping_packets or []):
             if not isinstance(packet, dict):
                 continue
             section_context = (

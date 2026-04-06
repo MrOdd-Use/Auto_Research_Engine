@@ -384,9 +384,9 @@ def _collect_embedding_check(cfg: Config) -> Dict[str, Any]:
         payload["status"] = "ok" if ok else "warning"
         payload["message"] = message
     else:
-        required_envs = PROVIDER_ENV_MAP.get(provider, [])
+        required_envs = [name for group in _provider_env_groups(provider) for name in group]
         present_envs = [name for name in required_envs if str(os.getenv(name) or "").strip()]
-        required_packages = PROVIDER_PACKAGE_MAP.get(provider, [])
+        required_packages = _provider_package_names(provider)
         missing_packages = [name for name in required_packages if importlib.util.find_spec(name) is None]
         payload["required_packages"] = required_packages
         payload["missing_packages"] = missing_packages

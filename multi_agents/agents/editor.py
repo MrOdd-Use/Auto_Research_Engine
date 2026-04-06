@@ -15,7 +15,7 @@ from .utils.llms import call_model
 from multi_agents.route_agent import build_route_context
 from ..memory.draft import DraftState
 from .researcher import ResearchAgent
-from .scrap import ScrapAgent
+from .scraping import ScrapingAgent
 from .check_data import CheckDataAgent
 from .reviewer import ReviewerAgent
 from .reviser import ReviserAgent
@@ -60,7 +60,7 @@ class EditorAgent:
         self.stream_output = stream_output
         self.tone = tone
         self.headers = headers or {}
-        self.enable_scrap = os.getenv("ASA_ENABLE_SCRAP", "true").strip().lower() != "false"
+        self.enable_scraping = os.getenv("ASA_ENABLE_SCRAPING", "true").strip().lower() != "false"
 
     # ── Planning ──────────────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ class EditorAgent:
         audit_feedback_queue = research_state.get("audit_feedback_queue") or task.get("audit_feedback_queue") or []
         shared_extra_hints = research_state.get("extra_hints") or task.get("extra_hints")
         existing_research_results = list(research_state.get("research_data") or [])
-        existing_scrap_packets = list(research_state.get("scrap_packets") or [])
+        existing_scraping_packets = list(research_state.get("scraping_packets") or [])
         existing_check_data_reports = list(research_state.get("check_data_reports") or [])
 
         async def run_one_section(idx: int, section_detail: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,7 +163,7 @@ class EditorAgent:
             if selected_section_key and section_key != selected_section_key:
                 return {
                     "draft": existing_research_results[idx] if idx < len(existing_research_results) else {},
-                    "scrap_packet": existing_scrap_packets[idx] if idx < len(existing_scrap_packets) else None,
+                    "scraping_packet": existing_scraping_packets[idx] if idx < len(existing_scraping_packets) else None,
                     "check_data_verdict": (
                         existing_check_data_reports[idx] if idx < len(existing_check_data_reports) else None
                     ),
@@ -200,12 +200,12 @@ class EditorAgent:
             *[run_one_section(idx, section_detail) for idx, section_detail in enumerate(section_details)]
         )
         research_results = [result.get("draft") for result in gathered_results]
-        scrap_packets = [result.get("scrap_packet") for result in gathered_results]
+        scraping_packets = [result.get("scraping_packet") for result in gathered_results]
         check_data_reports = [result.get("check_data_verdict") for result in gathered_results]
 
         return {
             "research_data": research_results,
-            "scrap_packets": scrap_packets,
+            "scraping_packets": scraping_packets,
             "check_data_reports": check_data_reports,
         }
 
@@ -340,7 +340,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
         """Initialize the research, reviewer, and reviser agents."""
         return {
             "research": ResearchAgent(self.websocket, self.stream_output, self.tone, self.headers),
-            "scrap": ScrapAgent(self.websocket, self.stream_output, self.tone, self.headers),
+            "scraping": ScrapingAgent(self.websocket, self.stream_output, self.tone, self.headers),
             "check_data": CheckDataAgent(self.websocket, self.stream_output, self.headers),
             "reviewer": ReviewerAgent(self.websocket, self.stream_output, self.headers),
             "reviser": ReviserAgent(self.websocket, self.stream_output, self.headers),
@@ -352,8 +352,8 @@ Return valid JSON only (no markdown fences) with this exact shape:
         workflow = StateGraph(DraftState)
 
         researcher_node = (
-            agents["scrap"].run_depth_scrap
-            if self.enable_scrap
+            agents["scraping"].run_depth_scraping
+            if self.enable_scraping
             else agents["research"].run_depth_research
         )
         workflow.add_node("researcher", researcher_node)
@@ -361,7 +361,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
         workflow.add_node("reviser", agents["reviser"].run)
 
         workflow.set_entry_point("researcher")
-        if self.enable_scrap:
+        if self.enable_scraping:
             workflow.add_node("check_data", agents["check_data"].run)
             workflow.add_edge("researcher", "check_data")
             workflow.add_conditional_edges(
@@ -454,20 +454,20 @@ Return valid JSON only (no markdown fences) with this exact shape:
         node = start_node or "researcher"
 
         while True:
-            if node in {"researcher", "scrap"}:
+            if node in {"researcher", "scraping"}:
                 state = await self._run_section_node(
-                    "scrap" if self.enable_scrap else "researcher",
-                    agents["scrap"].run_depth_scrap if self.enable_scrap else agents["research"].run_depth_research,
+                    "scraping" if self.enable_scraping else "researcher",
+                    agents["scraping"].run_depth_scraping if self.enable_scraping else agents["research"].run_depth_research,
                     state,
                     section_index=section_index,
                     section_title=section_title,
                     session_recorder=session_recorder,
                 )
-                node = "check_data" if self.enable_scrap else "reviewer"
-                if not self.enable_scrap:
+                node = "check_data" if self.enable_scraping else "reviewer"
+                if not self.enable_scraping:
                     continue
 
-            if self.enable_scrap:
+            if self.enable_scraping:
                 state = await self._run_section_node(
                     "check_data",
                     agents["check_data"].run,
@@ -538,7 +538,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
         task = state.setdefault("task", {})
         task["checkpoint_note"] = note
         task["checkpoint_target"] = node_name
-        if node_name in {"researcher", "scrap"}:
+        if node_name in {"researcher", "scraping"}:
             existing = str(state.get("extra_hints") or "").strip()
             state["extra_hints"] = f"{existing}\n{note}".strip() if existing else note
         elif node_name == "check_data":
@@ -559,12 +559,12 @@ Return valid JSON only (no markdown fences) with this exact shape:
         output_delta: Dict[str, Any],
         state_after: Dict[str, Any],
     ) -> Dict[str, Any]:
-        if node_name in {"researcher", "scrap"}:
-            scrap_packet = output_delta.get("scrap_packet") or {}
+        if node_name in {"researcher", "scraping"}:
+            scraping_packet = output_delta.get("scraping_packet") or {}
             return {
                 "iteration_index": output_delta.get("iteration_index") or state_after.get("iteration_index"),
-                "model_level": scrap_packet.get("model_level"),
-                "active_engines": scrap_packet.get("active_engines") or [],
+                "model_level": scraping_packet.get("model_level"),
+                "active_engines": scraping_packet.get("active_engines") or [],
             }
         if node_name == "check_data":
             verdict = output_delta.get("check_data_verdict") or {}

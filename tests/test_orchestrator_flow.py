@@ -25,7 +25,7 @@ class _FakeEditorAgent:
     async def run_parallel_research(self, state):
         return {
             "research_data": [{"Section A": "Body A"}],
-            "scrap_packets": [],
+            "scraping_packets": [],
             "check_data_reports": [],
         }
 

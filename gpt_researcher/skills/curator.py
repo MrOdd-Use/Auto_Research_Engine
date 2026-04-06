@@ -57,18 +57,21 @@ class SourceCurator:
 
         response = ""
         try:
+            _curate_prompt = self.researcher.prompt_family.curate_sources(
+                self.researcher.query, source_data, max_results)
+            _task_desc = _curate_prompt.split("\nSOURCES LIST TO EVALUATE:")[0].strip()
             response = await create_chat_completion(
                 model=self.researcher.cfg.smart_llm_model,
                 messages=[
                     {"role": "system", "content": f"{self.researcher.role}"},
-                    {"role": "user", "content": self.researcher.prompt_family.curate_sources(
-                        self.researcher.query, source_data, max_results)},
+                    {"role": "user", "content": _curate_prompt},
                 ],
                 temperature=0.2,
                 max_tokens=8000,
                 llm_provider=self.researcher.cfg.smart_llm_provider,
                 llm_kwargs=self.researcher.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs,
+                route_context={"task": _task_desc, "system_prompt": self.researcher.role},
             )
 
             curated_sources = json.loads(response)

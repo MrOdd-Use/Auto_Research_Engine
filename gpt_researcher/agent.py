@@ -531,6 +531,7 @@ class GPTResearcher:
             context += f"[{i}] {result.get('title', '')}: {result.get('content', '')} ({result.get('url', '')})\n\n"
 
         prompt = self.prompt_family.generate_quick_summary_prompt(query, context)
+        _task_desc = prompt.split("\nSearch Results:")[0].strip()
 
         summary = await create_chat_completion(
             model=self.cfg.smart_llm_model,
@@ -538,7 +539,8 @@ class GPTResearcher:
             llm_provider=self.cfg.smart_llm_provider,
             max_tokens=self.cfg.smart_token_limit,
             llm_kwargs=self.cfg.llm_kwargs,
-            cost_callback=self.add_costs
+            cost_callback=self.add_costs,
+            route_context={"task": _task_desc},
         )
 
         return summary

@@ -58,15 +58,16 @@ class RoutedLLMInvoker:
                 provider_call=provider_call,
             )
 
-        if getattr(self.client, "is_external_backend", False) is True:
+        if getattr(self.client, "is_external_backend", False) or getattr(self.client, "is_local_study", False):
             await self._ensure_external_startup_preflight()
 
-        decision = self.client.route(request)
+        decision = await asyncio.to_thread(self.client.route, request)
         runtime_context = getattr(decision, "runtime_context", None)
         selected_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
         self._emit(
             {
                 "type": "route_decision",
+                "backend": self.client.backend,
                 "application_name": request.application_name,
                 "shared_agent_class": decision.resolved_shared_agent_class,
                 "agent_role": request.agent_role,
@@ -88,6 +89,7 @@ class RoutedLLMInvoker:
         self._emit(
             {
                 "type": "execution_start",
+                "backend": self.client.backend,
                 "application_name": request.application_name,
                 "shared_agent_class": decision.resolved_shared_agent_class,
                 "agent_role": request.agent_role,
@@ -133,6 +135,7 @@ class RoutedLLMInvoker:
             self._emit(
                 {
                     "type": "execution_end",
+                    "backend": self.client.backend,
                     "status": "failed",
                     "application_name": request.application_name,
                     "shared_agent_class": decision.resolved_shared_agent_class,
@@ -164,6 +167,7 @@ class RoutedLLMInvoker:
         self._emit(
             {
                 "type": "execution_end",
+                "backend": self.client.backend,
                 "status": "completed",
                 "application_name": request.application_name,
                 "shared_agent_class": decision.resolved_shared_agent_class,
@@ -191,12 +195,10 @@ class RoutedLLMInvoker:
 
         max_models_raw = str(os.getenv("ROUTE_AGENT_PREFLIGHT_MAX_MODELS") or "").strip()
         max_models = int(max_models_raw) if max_models_raw.isdigit() else None
-        results = await asyncio.to_thread(
-            lambda: bridge.probe_global_pool(
-                force=False,
-                limit=max_models,
-                mark_unavailable=True,
-            )
+        results = await bridge.probe_global_pool_async(
+            force=False,
+            limit=max_models,
+            mark_unavailable=True,
         )
         ok_count = sum(1 for item in results if item.get("ok"))
         skipped_count = sum(1 for item in results if item.get("skipped"))
@@ -394,11 +396,19 @@ class RoutedLLMInvoker:
             "backend": "local_full",
             "application_name": request.application_name,
             "shared_agent_class": decision.resolved_shared_agent_class,
+            "agent_role": request.agent_role,
+            "stage_name": request.stage_name,
+            "requested_model": request.requested_model,
             "selected_model": decision.selected_model,
             "selected_provider": decision.selected_provider,
             "selected_model_id": selected_model_id,
             "routing_reason": decision.routing_reason,
+            "route_latency_ms": decision.route_latency_ms,
+            "analysis_latency_ms": decision.analysis_latency_ms,
+            "registry_latency_ms": decision.registry_latency_ms,
+            "selection_latency_ms": decision.selection_latency_ms,
             "trace_context": decision.trace_context,
+            "candidates": decision.candidates,
         })
 
         started_at = time.perf_counter()
@@ -420,9 +430,16 @@ class RoutedLLMInvoker:
                 "type": "execution_end",
                 "backend": "local_full",
                 "status": "failed",
+                "application_name": request.application_name,
+                "shared_agent_class": decision.resolved_shared_agent_class,
+                "agent_role": request.agent_role,
+                "stage_name": request.stage_name,
                 "selected_model": decision.selected_model,
+                "selected_provider": decision.selected_provider,
+                "selected_model_id": selected_model_id,
                 "execution_latency_ms": duration_ms,
                 "error": str(exc),
+                "trace_context": decision.trace_context,
             })
             raise
 
@@ -438,8 +455,15 @@ class RoutedLLMInvoker:
             "type": "execution_end",
             "backend": "local_full",
             "status": "completed",
+            "application_name": request.application_name,
+            "shared_agent_class": decision.resolved_shared_agent_class,
+            "agent_role": request.agent_role,
+            "stage_name": request.stage_name,
             "selected_model": decision.selected_model,
+            "selected_provider": decision.selected_provider,
+            "selected_model_id": selected_model_id,
             "execution_latency_ms": duration_ms,
+            "trace_context": decision.trace_context,
         })
         return result
 
@@ -460,12 +484,20 @@ class RoutedLLMInvoker:
             "backend": "federation",
             "application_name": request.application_name,
             "shared_agent_class": decision.resolved_shared_agent_class,
+            "agent_role": request.agent_role,
+            "stage_name": request.stage_name,
+            "requested_model": request.requested_model,
             "selected_model": decision.selected_model,
             "selected_provider": decision.selected_provider,
             "selected_model_id": selected_model_id,
             "routing_reason": decision.routing_reason,
+            "route_latency_ms": decision.route_latency_ms,
+            "analysis_latency_ms": decision.analysis_latency_ms,
+            "registry_latency_ms": decision.registry_latency_ms,
+            "selection_latency_ms": decision.selection_latency_ms,
             "lease_id": lease_id,
             "trace_context": decision.trace_context,
+            "candidates": decision.candidates,
         })
 
         started_at = time.perf_counter()
@@ -489,10 +521,17 @@ class RoutedLLMInvoker:
                 "type": "execution_end",
                 "backend": "federation",
                 "status": "failed",
+                "application_name": request.application_name,
+                "shared_agent_class": decision.resolved_shared_agent_class,
+                "agent_role": request.agent_role,
+                "stage_name": request.stage_name,
                 "selected_model": decision.selected_model,
+                "selected_provider": decision.selected_provider,
+                "selected_model_id": selected_model_id,
                 "lease_id": lease_id,
                 "execution_latency_ms": duration_ms,
                 "error": str(exc),
+                "trace_context": decision.trace_context,
             })
             raise
 
@@ -510,9 +549,16 @@ class RoutedLLMInvoker:
             "type": "execution_end",
             "backend": "federation",
             "status": "completed",
+            "application_name": request.application_name,
+            "shared_agent_class": decision.resolved_shared_agent_class,
+            "agent_role": request.agent_role,
+            "stage_name": request.stage_name,
             "selected_model": decision.selected_model,
+            "selected_provider": decision.selected_provider,
+            "selected_model_id": selected_model_id,
             "lease_id": lease_id,
             "execution_latency_ms": duration_ms,
+            "trace_context": decision.trace_context,
         })
         return result
 

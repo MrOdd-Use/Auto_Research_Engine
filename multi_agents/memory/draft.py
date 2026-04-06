@@ -10,7 +10,7 @@ class DraftState(TypedDict):
     audit_feedback: Optional[dict]
     check_data_action: str
     check_data_verdict: Optional[dict]
-    scrap_packet: Optional[dict]
+    scraping_packet: Optional[dict]
     coverage_metrics: Optional[dict]
     query_target_map: Optional[list]
     draft: dict

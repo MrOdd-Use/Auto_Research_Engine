@@ -10,8 +10,8 @@ Query: AI对就业市场的影响
   BP5  最终 publisher 输出后 — 查看完整最终文档
 
 输出文件（均在 outputs/route_agent_test/<timestamp>/）：
-  report_v1_before_scrap_rerun.md
-  report_v2_after_scrap_rerun_{section}.md
+  report_v1_before_scraping_rerun.md
+  report_v2_after_scraping_rerun_{section}.md
   report_v3_before_logic_challenge.md
   report_v4_after_logic_revision.md
   route_decisions.log
@@ -19,6 +19,8 @@ Query: AI对就业市场的影响
   operation_log.jsonl        (精简版)
   operation_log_full.jsonl   (完整版)
   terminal_output.log        (终端完整输出)
+  run the script : uv run python outputs/route_agent_test/route_agent_test.py
+
 """
 
 from __future__ import annotations
@@ -331,7 +333,7 @@ def fmt_outline(state: Dict[str, Any]) -> str:
 def fmt_research(state: Dict[str, Any]) -> str:
     """BP2：按 section 结构化展示所有检索文本。"""
     research_data   = state.get("research_data")  or []
-    scrap_packets   = state.get("scrap_packets")   or []
+    scraping_packets   = state.get("scraping_packets")   or []
     section_details = state.get("section_details") or []
     sections        = state.get("sections")        or []
 
@@ -355,7 +357,7 @@ def fmt_research(state: Dict[str, Any]) -> str:
             text = str(draft or "").strip()
             parts.append(textwrap.shorten(text, 1200, placeholder=" …（已截断）"))
 
-        pkt = scrap_packets[i] if i < len(scrap_packets) else None
+        pkt = scraping_packets[i] if i < len(scraping_packets) else None
         if pkt and isinstance(pkt, dict):
             log     = pkt.get("search_log") or []
             sources = pkt.get("sources") or pkt.get("source_urls") or []
@@ -550,7 +552,7 @@ async def run() -> None:
     wlog(
         "PHASE 1d | researcher 完成",
         research_items=len(state.get("research_data") or []),
-        scrap_packets=len(state.get("scrap_packets") or []),
+        scraping_packets=len(state.get("scraping_packets") or []),
     )
 
     # ── BP2: 检索结果审查 ────────────────────────────────────────────────────
@@ -586,9 +588,9 @@ async def run() -> None:
     # publisher → v1
     wlog("PHASE 1e | publisher: 输出 v1 报告")
     state = await chief._run_global_node("publisher", agents["publisher"].run, state, recorder=None)
-    _save_report(state, "report_v1_before_scrap_rerun.md", "v1 初稿（scrap 回溯前）")
+    _save_report(state, "report_v1_before_scraping_rerun.md", "v1 初稿（scraping 回溯前）")
 
-    # ── Phase 2: scrap 回溯 ──────────────────────────────────────────────────
+    # ── Phase 2: scraping 回溯 ──────────────────────────────────────────────────
     details  = state.get("section_details") or []
     sections = state.get("sections") or []
 
@@ -602,51 +604,51 @@ async def run() -> None:
                 lines.append(f"  [{i}] {s}")
         return "\n".join(lines)
 
-    scrap_choice = await bp(
-        "BP2.5 | Phase 2 — 选择 Scrap 回溯目标 Section",
-        _section_menu() + "\n\n将对选中 section 进行 2 次 scrap 回溯，补充更多来源。",
+    scraping_choice = await bp(
+        "BP2.5 | Phase 2 — 选择 Scraping 回溯目标 Section",
+        _section_menu() + "\n\n将对选中 section 进行 2 次 scraping 回溯，补充更多来源。",
         prompt_msg="输入 section 编号（0 起）；直接按 Enter 随机选择：",
     )
 
     n_sections = len(details or sections)
-    if scrap_choice.isdigit() and 0 <= int(scrap_choice) < n_sections:
-        scrap_idx = int(scrap_choice)
+    if scraping_choice.isdigit() and 0 <= int(scraping_choice) < n_sections:
+        scraping_idx = int(scraping_choice)
     else:
-        scrap_idx = random.randint(0, max(0, n_sections - 1))
+        scraping_idx = random.randint(0, max(0, n_sections - 1))
 
-    if scrap_idx < len(details) and isinstance(details[scrap_idx], dict):
-        scrap_header = str(details[scrap_idx].get("header") or f"Section {scrap_idx+1}")
-    elif scrap_idx < len(sections):
-        scrap_header = sections[scrap_idx]
+    if scraping_idx < len(details) and isinstance(details[scraping_idx], dict):
+        scraping_header = str(details[scraping_idx].get("header") or f"Section {scraping_idx+1}")
+    elif scraping_idx < len(sections):
+        scraping_header = sections[scraping_idx]
     else:
-        scrap_header = f"Section {scrap_idx+1}"
+        scraping_header = f"Section {scraping_idx+1}"
 
-    scrap_key  = _make_section_key(scrap_idx, scrap_header)
-    scrap_note = (
-        f"该 section「{scrap_header}」内容不够全面：缺少具体行业数据和案例支撑，"
+    scraping_key  = _make_section_key(scraping_idx, scraping_header)
+    scraping_note = (
+        f"该 section「{scraping_header}」内容不够全面：缺少具体行业数据和案例支撑，"
         f"请重新抓取更多来源，补充 2024-2025 年的最新统计数据和典型企业案例。"
     )
-    wlog("PHASE 2 | scrap 回溯 ×2", target=scrap_header, key=scrap_key)
+    wlog("PHASE 2 | scraping 回溯 ×2", target=scraping_header, key=scraping_key)
 
     for run_i in range(1, 3):
-        wlog(f"PHASE 2 | scrap 回溯第 {run_i} 次", section=scrap_header)
+        wlog(f"PHASE 2 | scraping 回溯第 {run_i} 次", section=scraping_header)
         state = await chief._run_researcher(
             state, recorder=None,
-            note=scrap_note,
-            selected_section_key=scrap_key,
-            section_start_node="scrap",
+            note=scraping_note,
+            selected_section_key=scraping_key,
+            section_start_node="scraping",
         )
-        wlog(f"PHASE 2 | scrap 回溯第 {run_i} 次完成")
+        wlog(f"PHASE 2 | scraping 回溯第 {run_i} 次完成")
 
-    # scrap 回溯后重跑 writer + claim + review/revise
-    wlog("PHASE 2 | scrap 回溯后重新生成报告")
+    # scraping 回溯后重跑 writer + claim + review/revise
+    wlog("PHASE 2 | scraping 回溯后重新生成报告")
     state = chief._prepare_for_writer_pass(state)
     state = await chief._inject_source_index(state)
     state = await chief._run_global_node("writer", agents["writer"].run, state, recorder=None)
     state = await chief._run_claim_review(state, recorder=None)
 
     reviewer_note_v2 = await bp(
-        f"BP3.2 | Scrap 回溯后 — 初稿 + Claim（section: {scrap_header}）",
+        f"BP3.2 | Scraping 回溯后 — 初稿 + Claim（section: {scraping_header}）",
         fmt_draft_claim(state),
         prompt_msg="按 Enter 进入 Review 循环；或输入意见：",
     )
@@ -654,8 +656,8 @@ async def run() -> None:
     state = await chief._annotate_if_needed(state)
     state = await chief._run_global_node("publisher", agents["publisher"].run, state, recorder=None)
 
-    safe_header = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", scrap_header.lower()).strip("_")[:30]
-    _save_report(state, f"report_v2_after_scrap_rerun_{safe_header}.md", "v2 scrap 回溯后")
+    safe_header = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", scraping_header.lower()).strip("_")[:30]
+    _save_report(state, f"report_v2_after_scraping_rerun_{safe_header}.md", "v2 scraping 回溯后")
 
     # ── Phase 3a: 保存质疑前版本 ─────────────────────────────────────────────
     _save_report(state, "report_v3_before_logic_challenge.md", "v3 整体逻辑质疑前")
@@ -711,8 +713,8 @@ async def run() -> None:
     _OP_LOG_FULL.close()
 
     print(f"\n所有文件已保存到: {OUT_DIR}")
-    print("  report_v1_before_scrap_rerun.md")
-    print(f"  report_v2_after_scrap_rerun_{safe_header}.md")
+    print("  report_v1_before_scraping_rerun.md")
+    print(f"  report_v2_after_scraping_rerun_{safe_header}.md")
     print("  report_v3_before_logic_challenge.md")
     print("  report_v4_after_logic_revision.md")
     print("  live_preflight.json")

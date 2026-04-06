@@ -111,6 +111,27 @@ class LiveProbeMixin:
             self._probe_entries_async(entries, force=force, router_storage=router_storage)
         )
 
+    async def probe_global_pool_async(
+        self,
+        *,
+        force: bool = False,
+        limit: int | None = None,
+        mark_unavailable: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Async version of probe_global_pool — no thread wrapping needed."""
+        entries = self.describe_global_pool()  # type: ignore[attr-defined]
+        if limit is not None:
+            entries = entries[: max(0, int(limit))]
+        if not entries:
+            return []
+
+        router_storage = None
+        if mark_unavailable:
+            _, engine = self._build_route_agent_runtime_support()  # type: ignore[attr-defined]
+            router_storage = getattr(engine, "_router_storage", None)
+
+        return await self._probe_entries_async(entries, force=force, router_storage=router_storage)
+
     async def _probe_entries_async(
         self,
         entries: Sequence[Dict[str, str]],

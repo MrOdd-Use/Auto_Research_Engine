@@ -1,4 +1,4 @@
-﻿# 质量门禁与校验
+# 质量门禁与校验
 
 > 覆盖题号：Q13, Q27, Q28, Q30, Q33
 
@@ -18,7 +18,7 @@
 - multi_agents/agents/editor.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
-- 实现：Check Data 从 `scrap_packet` 提取证据片段，抽取原子化约束（subject/time/metric/negative constraints），先做硬守卫（缺主体/缺时间直接 hard fail），再算分并输出 `ACCEPT/RETRY/BLOCKED`，同时生成 `instruction/new_query_suggestion` 写入 `audit_feedback/extra_hints` 驱动下一轮（见 `multi_agents/agents/check_data.py`）。
+- 实现：Check Data 从 `scraping_packet` 提取证据片段，抽取原子化约束（subject/time/metric/negative constraints），先做硬守卫（缺主体/缺时间直接 hard fail），再算分并输出 `ACCEPT/RETRY/BLOCKED`，同时生成 `instruction/new_query_suggestion` 写入 `audit_feedback/extra_hints` 驱动下一轮（见 `multi_agents/agents/check_data.py`）。
 - 为什么：把“证据不足”显式化并可控回流，避免在不可靠证据上继续写作与润色。
 - 利弊：利是降低高风险输出；弊是启发式抽取与字符串匹配会误判（误放行/误阻断），复杂推理或数字计算错误仍可能漏掉。
 
@@ -96,15 +96,15 @@
 
 **相关模块（对应实现）：**
 - multi_agents/agents/check_data.py
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - multi_agents/memory/draft.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
 - 实现（链路怎么“回写→合并→再消费”）：
   - Check Data 将本轮失败点结构化为 `check_data_verdict.feedback_packet`（缺失约束/纠偏指令/建议检索式等），并把可执行部分写回章节 state：`check_data_action="retry"`、`iteration_index` 递增、`audit_feedback` 写入 `instruction/new_query_suggestion/confidence_score`、`extra_hints` 写入“指令 + 建议检索式”的合并文本（见 `multi_agents/agents/check_data.py`、`multi_agents/memory/draft.py`）。
   - 章节级 workflow 读取 `check_data_action` 做条件分支：`retry` 回到证据采集节点，`accept/blocked` 结束该章（见 `multi_agents/agents/editor.py`）。
-  - ASA 在下一轮生成 2-4 个 search targets 时，会把 `audit_feedback` 与 `extra_hints` 一起注入提示，要求“把提示转成显式检索约束”，从而让 targets 更定向地补缺口（例如强制包含目标年份/主体/指标、加入 `actual/audited`，并排除 `projection/forecast` 等高风险措辞）（见 `multi_agents/agents/scrap.py`、`multi_agents/agents/check_data.py`）。
-  - 引擎组合也会随轮次变化：首轮偏通用覆盖，进入重试轮次后按领域路由到更专业的引擎集合，并对垂直引擎失败做通用引擎回退，配合更强约束提升信息增益（见 `multi_agents/agents/scrap.py`）。
+  - ASA 在下一轮生成 2-4 个 search targets 时，会把 `audit_feedback` 与 `extra_hints` 一起注入提示，要求“把提示转成显式检索约束”，从而让 targets 更定向地补缺口（例如强制包含目标年份/主体/指标、加入 `actual/audited`，并排除 `projection/forecast` 等高风险措辞）（见 `multi_agents/agents/scraping.py`、`multi_agents/agents/check_data.py`）。
+  - 引擎组合也会随轮次变化：首轮偏通用覆盖，进入重试轮次后按领域路由到更专业的引擎集合，并对垂直引擎失败做通用引擎回退，配合更强约束提升信息增益（见 `multi_agents/agents/scraping.py`）。
 - 为什么：用“缺口驱动”的定向补检索替代盲目扩大 top-k，能更快收敛并减少漂移。
 - 利弊：利是收敛更快、成本更可控；弊是缺口抽取若不准会把系统带偏，需要把失败样本进入回归集迭代词表/提示。
 
@@ -140,7 +140,7 @@
 
 **相关模块（对应实现）：**
 - multi_agents/agents/check_data.py
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 
 **技术细节（实现 / 为什么 / 利弊）：**
 - 实现：规划与写作提示中显式注入“今天日期”（见 `multi_agents/agents/editor.py`、`multi_agents/agents/writer.py`），Check Data 会从 topic 中用正则抽取年份/季度并作为硬守卫信号之一（见 `multi_agents/agents/check_data.py` 的 time_constraint 抽取）。
@@ -181,7 +181,7 @@
 **相关模块（对应实现）：**
 - multi_agents/agents/check_data.py
 - multi_agents/agents/claim_verifier.py
-- multi_agents/agents/scrap.py
+- multi_agents/agents/scraping.py
 - evals/hallucination_eval/
 
 **技术细节（实现 / 为什么 / 利弊）：**
@@ -250,7 +250,7 @@
 
 **实现落点：**
 - `multi_agents/agents/check_data.py`：RETRY 时生成 `feedback_packet`，并把 `instruction/new_query_suggestion` 写入 `audit_feedback` 与 `extra_hints`。
-- `multi_agents/agents/scrap.py`：每轮会合并 `extra_hints` 与 `audit_feedback`，并在“目标分解（3 targets）”时把 hints 转成明确检索约束。
+- `multi_agents/agents/scraping.py`：每轮会合并 `extra_hints` 与 `audit_feedback`，并在“目标分解（3 targets）”时把 hints 转成明确检索约束。
 - `tests/test_editor_check_data_workflow.py`：覆盖“第一次 RETRY 生成更强约束→第二次 ACCEPT”的闭环行为。
 
 **为什么这样设计：**

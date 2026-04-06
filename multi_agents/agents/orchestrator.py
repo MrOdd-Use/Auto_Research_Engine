@@ -556,7 +556,7 @@ class ChiefEditorAgent:
         *,
         section_index: int,
     ) -> None:
-        for key in ("research_data", "scrap_packets", "check_data_reports"):
+        for key in ("research_data", "scraping_packets", "check_data_reports"):
             new_values = rerun_result.get(key)
             if not isinstance(new_values, list) or section_index >= len(new_values):
                 continue
@@ -594,16 +594,16 @@ class ChiefEditorAgent:
         return "\n".join(lines)
 
     async def _inject_source_index(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Build source index from scrap_packets and inject into state for writer."""
+        """Build source index from scraping_packets and inject into state for writer."""
         verifier = self._workflow_agents.get("claim_verifier")
         if verifier is None:
             return state
-        scrap_packets = state.get("scrap_packets") or []
-        if not scrap_packets:
+        scraping_packets = state.get("scraping_packets") or []
+        if not scraping_packets:
             return state
         section_contexts = self._build_section_contexts(state)
         source_index, _ = verifier.build_source_index(
-            scrap_packets,
+            scraping_packets,
             section_contexts=section_contexts,
         )
         state["source_index"] = source_index
@@ -674,7 +674,7 @@ class ChiefEditorAgent:
             selected_contexts = []
             for context in section_contexts:
                 section_index = int(context["section_index"])
-                packets = state.get("scrap_packets") or []
+                packets = state.get("scraping_packets") or []
                 if section_index >= len(packets):
                     continue
                 selected_packets.append(packets[section_index])
@@ -863,7 +863,7 @@ class ChiefEditorAgent:
         if node_name == "researcher":
             return {
                 "research_items": len(output_delta.get("research_data") or []),
-                "scrap_packets": len(output_delta.get("scrap_packets") or []),
+                "scraping_packets": len(output_delta.get("scraping_packets") or []),
                 "check_data_reports": len(output_delta.get("check_data_reports") or []),
             }
         if node_name == "writer":

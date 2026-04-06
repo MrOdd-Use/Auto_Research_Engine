@@ -23,14 +23,30 @@ from .utils.llms import call_model
 from .utils.views import print_agent_output
 
 
-class ScrapAgent:
-    """Adaptive Scrap Agent: multi-iteration search + dedup + MMR rerank."""
+class ScrapingAgent:
+    """Adaptive Scraping Agent: multi-iteration search + dedup + MMR rerank."""
 
     ROUND_TO_TIER = {1: 3, 2: 2, 3: 1}
     ROUND_TO_LEVEL = {
         1: "Level_1_Base",
         2: "Level_2_Pro",
         3: "Level_3_Max",
+    }
+    # Domains known to block headless scrapers; skip BS scraping and rely on
+    # the body text already returned by the search engine (Tavily raw_content).
+    ANTI_SCRAPE_DOMAINS = {
+        "reddit.com",
+        "toutiao.com",
+        "h5.ifeng.com",
+        "ifeng.com",
+        "wallstreetcn.com",
+        "post.smzdm.com",
+        "vzkoo.com",
+        "m.caijing.com.cn",
+        "caijing.com.cn",
+        "k.sina.com.cn",
+        "allpku.com",
+        "ecommercefastlane.com",
     }
     DOMAIN_TO_ENGINES = {
         "tech": ["arxiv", "semantic_scholar", "google"],
@@ -68,13 +84,13 @@ class ScrapAgent:
         self.state_controller = StateController(state_file=state_file)
         self._mmr_embeddings = None
         self._mmr_embeddings_error: Optional[str] = None
-        self._use_embedding_mmr = self._env_truthy("SCRAP_MMR_USE_EMBEDDINGS", default=True)
-        self._min_search_targets = self._env_int("SCRAP_MIN_SEARCH_TARGETS", default=2, min_value=1, max_value=8)
-        self._max_search_targets = self._env_int("SCRAP_MAX_SEARCH_TARGETS", default=4, min_value=1, max_value=12)
+        self._use_embedding_mmr = self._env_truthy("SCRAPING_MMR_USE_EMBEDDINGS", default=True)
+        self._min_search_targets = self._env_int("SCRAPING_MIN_SEARCH_TARGETS", default=2, min_value=1, max_value=8)
+        self._max_search_targets = self._env_int("SCRAPING_MAX_SEARCH_TARGETS", default=4, min_value=1, max_value=12)
         if self._max_search_targets < self._min_search_targets:
             self._max_search_targets = self._min_search_targets
 
-    async def run_depth_scrap(self, draft_state: dict) -> dict:
+    async def run_depth_scraping(self, draft_state: dict) -> dict:
         task = draft_state.get("task") or {}
         topic = str(draft_state.get("topic") or "").strip()
         if not topic:
@@ -85,8 +101,8 @@ class ScrapAgent:
         extra_hints = draft_state.get("extra_hints")
         iteration_override = draft_state.get("iteration_index")
         query_domains = task.get("query_domains") or []
-        max_results = int(task.get("scrap_max_search_results") or task.get("max_search_results_per_query") or 7)
-        max_iterations = int(task.get("scrap_max_iterations") or 3)
+        max_results = self._task_int(task, "scraping_max_search_results", "max_search_results_per_query", default=7)
+        max_iterations = self._task_int(task, "scraping_max_iterations", default=3)
 
         use_single_iteration = iteration_override is not None
         if use_single_iteration:
@@ -100,17 +116,17 @@ class ScrapAgent:
         if self.websocket and self.stream_output:
             await self.stream_output(
                 "logs",
-                "scrap_start",
-                f"Running ASA Scrap loop for topic: {topic}",
+                "scraping_start",
+                f"Running ASA Scraping loop for topic: {topic}",
                 self.websocket,
             )
         else:
-            print_agent_output(f"Running ASA Scrap loop for topic: {topic}", agent="SCRAP")
+            print_agent_output(f"Running ASA Scraping loop for topic: {topic}", agent="SCRAPING")
 
         try:
             for iteration in iteration_plan:
                 tier_idx = self.ROUND_TO_TIER.get(iteration, 3)
-                self.state_controller.set_tier("scrap", tier_idx)
+                self.state_controller.set_tier("scraping", tier_idx)
                 model_name = self._resolve_model_for_iteration(task, iteration)
                 extra_hints_applied = self._merge_extra_hints(extra_hints, audit_feedback)
                 source_queries = self._normalize_research_queries(
@@ -230,7 +246,7 @@ class ScrapAgent:
                 }
                 packets.append(packet)
                 self.logger.info(
-                    "scrap_iteration_complete",
+                    "scraping_iteration_complete",
                     extra={
                         "iteration": iteration,
                         "tier": tier_idx,
@@ -239,14 +255,14 @@ class ScrapAgent:
                     },
                 )
         finally:
-            # Reset Scrap to default base tier after loop
-            self.state_controller.set_tier("scrap", 3)
+            # Reset Scraping to default base tier after loop
+            self.state_controller.set_tier("scraping", 3)
 
         final_packet = packets[-1] if packets else self._empty_packet()
         draft_text = self._build_compatible_draft(topic, final_packet)
         return {
             "draft": {topic: draft_text},
-            "scrap_packet": final_packet,
+            "scraping_packet": final_packet,
             "iteration_index": final_packet.get("iteration_index", 1),
         }
 
@@ -264,11 +280,11 @@ class ScrapAgent:
         return 3 if score < 0.7 else 2
 
     def _resolve_model_for_iteration(self, task: dict, iteration: int) -> str:
-        explicit = task.get(f"scrap_level_{iteration}_model")
+        explicit = self._task_value(task, f"scraping_level_{iteration}_model")
         if explicit:
             return str(explicit)
         fallback = self.MODEL_LEVEL_FALLBACK.get(iteration, "gpt-4o-mini")
-        return self.state_controller.get_current_model("scrap", fallback_model=fallback)
+        return self.state_controller.get_current_model("scraping", fallback_model=fallback)
 
     def _normalize_research_queries(self, raw_queries: Any) -> List[str]:
         if not isinstance(raw_queries, list):
@@ -332,7 +348,7 @@ class ScrapAgent:
             route_context = build_route_context(
                 application_name=str((task_payload or {}).get("application_name") or "auto_research_engine"),
                 shared_agent_class="scrape_agent",
-                agent_role="scrap",
+                agent_role="scraping",
                 stage_name="target_decomposition",
                 system_prompt="You decompose one source query into smaller search targets.",
                 task=source_query,
@@ -767,7 +783,23 @@ class ScrapAgent:
             return url
 
     async def _materialize_search_results(self, search_results: List[dict]) -> List[dict]:
-        urls = [item["href"] for item in search_results if item.get("href")]
+        def _is_anti_scrape(url: str) -> bool:
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(url).netloc.lower().lstrip("www.")
+                return any(host == d or host.endswith("." + d) for d in self.ANTI_SCRAPE_DOMAINS)
+            except Exception:
+                return False
+
+        # Only scrape URLs that (a) are not on the anti-scrape list and
+        # (b) don't already have enough content from the search engine.
+        needs_scraping = [
+            item for item in search_results
+            if item.get("href")
+            and not _is_anti_scrape(item["href"])
+            and len(item.get("body") or "") < 500
+        ]
+        urls = [item["href"] for item in needs_scraping]
         scraped_map = {}
         if urls:
             scraped_data = await self._scrape_urls(urls)
@@ -780,6 +812,7 @@ class ScrapAgent:
             url = item.get("href")
             norm_url = self._normalize_url(url)
             scraped = scraped_map.get(norm_url, {})
+            # Priority: full scraped content > Tavily raw_content (body) > nothing
             raw_content = str(scraped.get("raw_content") or item.get("body") or "")
             if not raw_content.strip():
                 continue
@@ -960,7 +993,7 @@ class ScrapAgent:
         if remaining <= 0.05:
             return []
 
-        max_embed_passages = self._env_int("SCRAP_MMR_MAX_EMBED_PASSAGES", default=80, min_value=10, max_value=500)
+        max_embed_passages = self._env_int("SCRAPING_MMR_MAX_EMBED_PASSAGES", default=80, min_value=10, max_value=500)
         candidates = passages
         if len(passages) > max_embed_passages:
             query_vec = self._text_to_vector(query)
@@ -1113,6 +1146,24 @@ class ScrapAgent:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _task_value(task: dict, *keys: str) -> Any:
+        """Return the first explicit task value across canonical and legacy keys."""
+        for key in keys:
+            if key in task and task.get(key) is not None:
+                return task.get(key)
+        return None
+
+    def _task_int(self, task: dict, *keys: str, default: int) -> int:
+        """Read an integer task setting while honoring legacy key names."""
+        raw = self._task_value(task, *keys)
+        if raw is None:
+            return default
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return default
+
     def _env_truthy(self, key: str, default: bool = False) -> bool:
         raw = os.getenv(key)
         if raw is None:
@@ -1171,10 +1222,10 @@ class ScrapAgent:
             "fallback_used": False,
         }
 
-    def _build_compatible_draft(self, topic: str, scrap_packet: dict) -> str:
+    def _build_compatible_draft(self, topic: str, scraping_packet: dict) -> str:
         lines = [f"### {topic}", "", "#### Curated Objective Passages"]
         counter = 1
-        for target_log in scrap_packet.get("search_log", []):
+        for target_log in scraping_packet.get("search_log", []):
             target = target_log.get("target", "")
             lines.append("")
             lines.append(f"Target: {target}")

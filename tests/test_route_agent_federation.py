@@ -236,7 +236,7 @@ async def test_invoker_federation_success_path():
 
     outcome_kwargs = mock_federation.report_outcome.call_args.kwargs
     assert outcome_kwargs["lease_id"] == "lease-001"
-    assert outcome_kwargs["outcome_type"] == "success"
+    assert outcome_kwargs["outcome_type"] == "exec_success"
     assert outcome_kwargs["model_id"] == "gpt-4o-mini"
 
 
@@ -277,7 +277,7 @@ async def test_invoker_federation_failure_path():
 
     mock_federation.release.assert_awaited_once_with("lease-002")
     outcome_kwargs = mock_federation.report_outcome.call_args.kwargs
-    assert outcome_kwargs["outcome_type"] == "failure"
+    assert outcome_kwargs["outcome_type"] == "exec_fail"
 
 
 @pytest.mark.asyncio

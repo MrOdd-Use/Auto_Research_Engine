@@ -16,12 +16,12 @@ class _FakeHumanAgent:
         return {"human_feedback": None}
 
 
-class _CountingScrapAgent:
+class _CountingScrapingAgent:
     def __init__(self):
         self.calls_by_topic = {}
         self.note_log = []
 
-    async def run_depth_scrap(self, draft_state):
+    async def run_depth_scraping(self, draft_state):
         topic = draft_state["topic"]
         self.calls_by_topic[topic] = self.calls_by_topic.get(topic, 0) + 1
         self.note_log.append(
@@ -34,7 +34,7 @@ class _CountingScrapAgent:
         iteration = int(draft_state.get("iteration_index") or 1)
         return {
             "draft": {topic: f"{topic} draft v{self.calls_by_topic[topic]}"},
-            "scrap_packet": {
+            "scraping_packet": {
                 "iteration_index": iteration,
                 "model_level": "Level_1_Base",
                 "active_engines": ["tavily"],
@@ -78,9 +78,9 @@ class _NoopSectionReviser:
 class _CheckpointEditorAgent(EditorAgent):
     def __init__(self, section_titles):
         super().__init__(None, None, None, {})
-        self.enable_scrap = True
+        self.enable_scraping = True
         self.section_titles = section_titles
-        self.scrap_agent = _CountingScrapAgent()
+        self.scraping_agent = _CountingScrapingAgent()
         self.check_data_agent = _CountingCheckDataAgent()
 
     async def plan_research(self, state):
@@ -103,7 +103,7 @@ class _CheckpointEditorAgent(EditorAgent):
     def _initialize_agents(self):
         return {
             "research": None,
-            "scrap": self.scrap_agent,
+            "scraping": self.scraping_agent,
             "check_data": self.check_data_agent,
             "reviewer": _NoopSectionReviewer(),
             "reviser": _NoopSectionReviser(),
@@ -285,7 +285,7 @@ async def test_initial_run_persists_global_and_section_checkpoints(tmp_path):
         for checkpoint in saved_session["checkpoints"]
         if checkpoint["scope"] == "section_node"
     ]
-    assert section_nodes.count("scrap") == 2
+    assert section_nodes.count("scraping") == 2
     assert section_nodes.count("check_data") == 2
 
     workflow_response = await workflow_store.build_workflow_response(report_id)
@@ -324,7 +324,7 @@ async def test_section_rerun_only_reexecutes_selected_section_and_creates_new_ro
     await chief.run_research_task(task_id="round-1", session_recorder=recorder_1)
     session_1 = await workflow_store.get_session(report_id, recorder_1.session_id)
 
-    section_checkpoint = _find_checkpoint(session_1, node_name="scrap", scope="section_node")
+    section_checkpoint = _find_checkpoint(session_1, node_name="scraping", scope="section_node")
     selected_section_key = section_checkpoint["section_key"]
     selected_topic = section_checkpoint["section_title"]
     other_topic = next(title for title in editor.section_titles if title != selected_topic)
@@ -359,8 +359,8 @@ async def test_section_rerun_only_reexecutes_selected_section_and_creates_new_ro
     assert session_2["parent_session_id"] == recorder_1.session_id
     assert session_2["round_index"] == 2
     assert session_2["rerun_from_checkpoint_id"] == section_checkpoint["checkpoint_id"]
-    assert editor.scrap_agent.calls_by_topic[selected_topic] == 2
-    assert editor.scrap_agent.calls_by_topic[other_topic] == 1
+    assert editor.scraping_agent.calls_by_topic[selected_topic] == 2
+    assert editor.scraping_agent.calls_by_topic[other_topic] == 1
     assert editor.check_data_agent.calls_by_topic[selected_topic] == 2
     assert editor.check_data_agent.calls_by_topic[other_topic] == 1
     assert writer.calls == 2
@@ -375,7 +375,7 @@ async def test_section_rerun_only_reexecutes_selected_section_and_creates_new_ro
     assert session_2_section_keys == {selected_section_key}
     assert any(
         entry["topic"] == selected_topic and "Use audited sources only" in str(entry["extra_hints"] or "")
-        for entry in editor.scrap_agent.note_log
+        for entry in editor.scraping_agent.note_log
     )
 
 
@@ -409,7 +409,7 @@ async def test_multi_round_reruns_track_parentage_and_preserve_last_successful_a
     await chief.run_research_task(task_id="round-1", session_recorder=recorder_1)
     session_1 = await workflow_store.get_session(report_id, recorder_1.session_id)
 
-    section_checkpoint = _find_checkpoint(session_1, node_name="scrap", scope="section_node")
+    section_checkpoint = _find_checkpoint(session_1, node_name="scraping", scope="section_node")
     recorder_2 = await _create_recorder(
         workflow_store,
         report_id,

@@ -60,6 +60,7 @@ class RouteRequest:
 class RouteDecision:
     selected_model: str
     selected_provider: str = ""
+    selected_model_id: str = ""
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     resolved_shared_agent_class: str = ""
     class_resolution_source: str = ""
@@ -76,6 +77,7 @@ class RouteDecision:
         return {
             "selected_model": self.selected_model,
             "selected_provider": self.selected_provider,
+            "selected_model_id": self.selected_model_id,
             "candidates": list(self.candidates),
             "resolved_shared_agent_class": self.resolved_shared_agent_class,
             "class_resolution_source": self.class_resolution_source,

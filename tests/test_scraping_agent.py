@@ -1,15 +1,15 @@
 import pytest
 
-from multi_agents.agents.scrap import ScrapAgent
+from multi_agents.agents.scraping import ScrapingAgent
 from multi_agents.agents.state_controller import StateController
 
 
 def _make_agent(tmp_path, monkeypatch):
-    monkeypatch.setenv("SCRAP_MMR_USE_EMBEDDINGS", "0")
-    agent = ScrapAgent()
+    monkeypatch.setenv("SCRAPING_MMR_USE_EMBEDDINGS", "0")
+    agent = ScrapingAgent()
     agent.state_controller = StateController(str(tmp_path / "agent_state.json"))
 
-    async def fake_decompose_query_to_targets(source_query, research_context, extra_hints, model_name):
+    async def fake_decompose_query_to_targets(source_query, research_context, extra_hints, model_name, **kwargs):
         return [f"{source_query} target A", f"{source_query} target B", f"{source_query} target C"]
 
     async def fake_scrape_urls(urls):
@@ -28,7 +28,7 @@ def _make_agent(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_scrap_round1_uses_tavily(tmp_path, monkeypatch):
+async def test_scraping_round1_uses_tavily(tmp_path, monkeypatch):
     agent = _make_agent(tmp_path, monkeypatch)
     seen_engines = set()
 
@@ -40,14 +40,14 @@ async def test_scrap_round1_uses_tavily(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(agent, "_search_with_engine", fake_search_with_engine)
-    result = await agent.run_depth_scrap({"task": {}, "topic": "AI Chips", "research_context": {}})
+    result = await agent.run_depth_scraping({"task": {}, "topic": "AI Chips", "research_context": {}})
 
     assert seen_engines == {"tavily"}
-    assert result["scrap_packet"]["iteration_index"] == 1
+    assert result["scraping_packet"]["iteration_index"] == 1
 
 
 @pytest.mark.asyncio
-async def test_scrap_round2_domain_routing(tmp_path, monkeypatch):
+async def test_scraping_round2_domain_routing(tmp_path, monkeypatch):
     agent = _make_agent(tmp_path, monkeypatch)
 
     async def fake_search_with_engine(engine, query, query_domains, max_results):
@@ -57,7 +57,7 @@ async def test_scrap_round2_domain_routing(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(agent, "_search_with_engine", fake_search_with_engine)
-    result = await agent.run_depth_scrap(
+    result = await agent.run_depth_scraping(
         {
             "task": {},
             "topic": "AI model scaling limits",
@@ -66,8 +66,8 @@ async def test_scrap_round2_domain_routing(tmp_path, monkeypatch):
         }
     )
 
-    assert result["scrap_packet"]["iteration_index"] == 2
-    assert result["scrap_packet"]["active_engines"] == ["arxiv", "google", "semantic_scholar"]
+    assert result["scraping_packet"]["iteration_index"] == 2
+    assert result["scraping_packet"]["active_engines"] == ["arxiv", "google", "semantic_scholar"]
 
 
 def test_url_set_union_dedup(tmp_path, monkeypatch):
@@ -109,8 +109,8 @@ async def test_external_feedback_gate(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(agent, "_search_with_engine", fake_search_with_engine)
-    result = await agent.run_depth_scrap({"task": {}, "topic": "Nvidia revenue", "research_context": {}})
-    assert result["scrap_packet"]["iteration_index"] == 1
+    result = await agent.run_depth_scraping({"task": {}, "topic": "Nvidia revenue", "research_context": {}})
+    assert result["scraping_packet"]["iteration_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -147,8 +147,8 @@ async def test_output_contract_prd_json(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(agent, "_search_with_engine", fake_search_with_engine)
-    result = await agent.run_depth_scrap({"task": {}, "topic": "AI export control", "research_context": {}})
-    packet = result["scrap_packet"]
+    result = await agent.run_depth_scraping({"task": {}, "topic": "AI export control", "research_context": {}})
+    packet = result["scraping_packet"]
 
     assert {
         "iteration_index",
@@ -190,7 +190,7 @@ async def test_writer_compat_research_data_present(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(agent, "_search_with_engine", fake_search_with_engine)
-    result = await agent.run_depth_scrap({"task": {}, "topic": "Semiconductor policy", "research_context": {}})
+    result = await agent.run_depth_scraping({"task": {}, "topic": "Semiconductor policy", "research_context": {}})
 
     assert isinstance(result["draft"], dict)
     assert "Semiconductor policy" in result["draft"]

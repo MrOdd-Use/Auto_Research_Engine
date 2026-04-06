@@ -64,18 +64,14 @@ async def test_plan_research_falls_back_when_model_output_is_empty(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_parallel_research_uses_fallback_section_when_empty(monkeypatch):
-    class FakeChain:
-        async def ainvoke(self, payload, config=None):
-            return {"draft": {"topic": payload["topic"]}}
-
-    class FakeWorkflow:
-        def compile(self):
-            return FakeChain()
-
     agent = EditorAgent()
 
     monkeypatch.setattr(agent, "_initialize_agents", lambda: {})
-    monkeypatch.setattr(agent, "_create_workflow", lambda agents: FakeWorkflow())
+
+    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_title, session_recorder=None, start_node=None):
+        return {"draft": {"topic": draft_state.get("topic", "")}}
+
+    monkeypatch.setattr(agent, "_run_section_workflow", fake_run_section_workflow)
 
     result = await agent.run_parallel_research(
         {
@@ -89,32 +85,28 @@ async def test_run_parallel_research_uses_fallback_section_when_empty(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_run_parallel_research_collects_scrap_packets(monkeypatch):
-    class FakeChain:
-        async def ainvoke(self, payload, config=None):
-            return {
-                "draft": {"topic": payload["topic"]},
-                "scrap_packet": {
-                    "iteration_index": 1,
-                    "model_level": "Level_1_Base",
-                    "active_engines": ["Tavily"],
-                    "search_log": [],
-                },
-                "check_data_verdict": {
-                    "status": "ACCEPT",
-                    "deep_eval_report": {"final_score": 0.9},
-                    "feedback_packet": {"instruction": "", "new_query_suggestion": ""},
-                },
-            }
-
-    class FakeWorkflow:
-        def compile(self):
-            return FakeChain()
-
+async def test_run_parallel_research_collects_scraping_packets(monkeypatch):
     agent = EditorAgent()
 
     monkeypatch.setattr(agent, "_initialize_agents", lambda: {})
-    monkeypatch.setattr(agent, "_create_workflow", lambda agents: FakeWorkflow())
+
+    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_title, session_recorder=None, start_node=None):
+        return {
+            "draft": {"topic": draft_state.get("topic", "")},
+            "scraping_packet": {
+                "iteration_index": 1,
+                "model_level": "Level_1_Base",
+                "active_engines": ["Tavily"],
+                "search_log": [],
+            },
+            "check_data_verdict": {
+                "status": "ACCEPT",
+                "deep_eval_report": {"final_score": 0.9},
+                "feedback_packet": {"instruction": "", "new_query_suggestion": ""},
+            },
+        }
+
+    monkeypatch.setattr(agent, "_run_section_workflow", fake_run_section_workflow)
 
     result = await agent.run_parallel_research(
         {
@@ -123,7 +115,7 @@ async def test_run_parallel_research_collects_scrap_packets(monkeypatch):
         }
     )
 
-    assert len(result["scrap_packets"]) == 1
-    assert result["scrap_packets"][0]["model_level"] == "Level_1_Base"
+    assert len(result["scraping_packets"]) == 1
+    assert result["scraping_packets"][0]["model_level"] == "Level_1_Base"
     assert len(result["check_data_reports"]) == 1
     assert result["check_data_reports"][0]["status"] == "ACCEPT"
