@@ -10,6 +10,7 @@ from urllib.request import urlopen
 
 from dotenv import load_dotenv
 
+from backend.utils import create_output_session_dir
 from gpt_researcher.config.config import Config
 from gpt_researcher.mcp import HAS_MCP_ADAPTERS
 
@@ -54,7 +55,7 @@ class _FallbackConfig:
 def run_live_preflight(
     *,
     env_path: str | Path = ".env",
-    output_path: str | Path = "outputs/route_agent_test/live_preflight.json",
+    output_path: str | Path | None = None,
     include_live_model_probe: bool = False,
     live_probe_limit: int | None = None,
 ) -> Dict[str, Any]:
@@ -101,6 +102,8 @@ def run_live_preflight(
         "issues": issues,
     }
 
+    if output_path is None:
+        output_path = Path(create_output_session_dir("live-preflight")) / "live_preflight.json"
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

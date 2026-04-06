@@ -7,11 +7,11 @@ python cli.py "<query>" --tone objective
 import argparse
 import asyncio
 import os
-from uuid import uuid4
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-from backend.utils import write_md_to_pdf, write_md_to_word
+from backend.utils import create_output_session_dir, write_md_to_pdf, write_md_to_word
 from gpt_researcher.utils.enum import Tone
 from multi_agents.main import run_research_task
 
@@ -104,17 +104,15 @@ async def main(query: str, tone: str, no_pdf: bool, no_docx: bool):
         else:
             report = str(result)
 
-        task_id = str(uuid4())
-        os.makedirs("outputs", exist_ok=True)
-
-        md_path = f"outputs/{task_id}.md"
+        output_dir = Path(create_output_session_dir(query))
+        md_path = output_dir / "report.md"
         with open(md_path, "w", encoding="utf-8") as handle:
             handle.write(report)
         print(f"Report written to '{md_path}'")
 
         if not no_pdf:
             try:
-                pdf_path = await write_md_to_pdf(report, task_id)
+                pdf_path = await write_md_to_pdf(report, filename="report", output_dir=str(output_dir))
                 if pdf_path:
                     print(f"PDF written to '{pdf_path}'")
             except Exception as exc:
@@ -122,7 +120,7 @@ async def main(query: str, tone: str, no_pdf: bool, no_docx: bool):
 
         if not no_docx:
             try:
-                docx_path = await write_md_to_word(report, task_id)
+                docx_path = await write_md_to_word(report, filename="report", output_dir=str(output_dir))
                 if docx_path:
                     print(f"DOCX written to '{docx_path}'")
             except Exception as exc:

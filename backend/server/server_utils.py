@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from gpt_researcher.document.document import DocumentLoader
 from gpt_researcher.actions import stream_output
 from multi_agents.main import run_research_task
-from backend.utils import write_md_to_pdf, write_md_to_word, write_text_to_md
+from backend.utils import create_output_session_dir, write_md_to_pdf, write_md_to_word, write_text_to_md
 from pathlib import Path
 from datetime import datetime
 from fastapi import HTTPException
@@ -53,16 +53,19 @@ WINDOWS_RESERVED_NAMES = {
 
 class CustomLogsHandler:
     """Custom handler to capture streaming logs from the research process"""
-    def __init__(self, websocket, task: str, report_id: str | None = None, event_callback=None):
+    def __init__(self, websocket, task: str, report_id: str | None = None, event_callback=None, output_dir: str | None = None):
         self.logs = []
         self.websocket = websocket
         self.event_callback = event_callback
-        file_seed = report_id or sanitize_filename(f"task_{int(time.time())}_{task}")
-        sanitized_filename = sanitize_filename(str(file_seed))
-        self.log_file = os.path.join("outputs", f"{sanitized_filename}.json")
+        if output_dir:
+            self.output_dir = output_dir
+        else:
+            file_seed = report_id or task
+            self.output_dir = create_output_session_dir(str(file_seed))
+        self.log_file = os.path.join(self.output_dir, "session.json")
         self.timestamp = datetime.now().isoformat()
         # Initialize log file with metadata
-        os.makedirs("outputs", exist_ok=True)
+        os.makedirs(self.output_dir, exist_ok=True)
         with open(self.log_file, 'w') as f:
             json.dump({
                 "timestamp": self.timestamp,
@@ -117,8 +120,9 @@ class Researcher:
         self.report_type = report_type
         # Generate unique ID for this research task
         self.research_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{hash(query)}"
+        self.output_dir = create_output_session_dir(query)
         # Initialize logs handler with research ID
-        self.logs_handler = CustomLogsHandler(None, self.research_id)
+        self.logs_handler = CustomLogsHandler(None, self.research_id, output_dir=self.output_dir)
 
     async def research(self) -> dict:
         """Conduct research and return paths to generated files"""
@@ -133,8 +137,7 @@ class Researcher:
             report = str(result)
         
         # Generate the files
-        sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{self.query}")
-        file_paths = await generate_report_files(report, sanitized_filename)
+        file_paths = await generate_report_files(report, self.output_dir)
         
         # Get the JSON log path that was created by CustomLogsHandler
         json_relative_path = os.path.relpath(self.logs_handler.log_file)
@@ -329,6 +332,7 @@ async def handle_start_command(websocket, data: str, manager):
         raise ValueError("Workflow store is not configured.")
 
     report_id = str(report_id or sanitize_filename(f"task_{int(time.time())}_{task}"))
+    output_dir = create_output_session_dir(task or report_id)
     session = await workflow_store.create_session(
         report_id,
         note=None,
@@ -356,6 +360,7 @@ async def handle_start_command(websocket, data: str, manager):
         task,
         report_id=report_id,
         event_callback=session_recorder.append_event,
+        output_dir=output_dir,
     )
     # Initialize log content with query
     await logs_handler.send_json({
@@ -390,7 +395,7 @@ async def handle_start_command(websocket, data: str, manager):
             if isinstance(report_result, dict)
             else str(report_result)
         )
-        file_paths = await generate_report_files(report, report_id)
+        file_paths = await generate_report_files(report, output_dir)
         # Add JSON log path to file_paths
         file_paths["json"] = os.path.relpath(logs_handler.log_file)
         await session_recorder.append_path_event(file_paths)
@@ -471,11 +476,13 @@ async def handle_rerun_command(websocket, data: str, manager):
         },
     )
 
+    output_dir = create_output_session_dir(note or task or report_id)
     logs_handler = CustomLogsHandler(
         websocket,
         task,
         report_id=report_id,
         event_callback=session_recorder.append_event,
+        output_dir=output_dir,
     )
     await logs_handler.send_json(
         {
@@ -515,7 +522,7 @@ async def handle_rerun_command(websocket, data: str, manager):
             if isinstance(report_result, dict)
             else str(report_result)
         )
-        file_paths = await generate_report_files(report, report_id)
+        file_paths = await generate_report_files(report, output_dir)
         file_paths["json"] = os.path.relpath(logs_handler.log_file)
         await session_recorder.append_path_event(file_paths)
         await _upsert_report(
@@ -684,10 +691,10 @@ async def handle_chat_command(websocket, data: str):
             "role": "assistant"
         })
 
-async def generate_report_files(report: str, filename: str) -> Dict[str, str]:
-    pdf_path = await write_md_to_pdf(report, filename)
-    docx_path = await write_md_to_word(report, filename)
-    md_path = await write_text_to_md(report, filename)
+async def generate_report_files(report: str, output_dir: str) -> Dict[str, str]:
+    pdf_path = await write_md_to_pdf(report, filename="report", output_dir=output_dir)
+    docx_path = await write_md_to_word(report, filename="report", output_dir=output_dir)
+    md_path = await write_text_to_md(report, filename="report", output_dir=output_dir)
     return {"pdf": pdf_path, "docx": docx_path, "md": md_path}
 
 

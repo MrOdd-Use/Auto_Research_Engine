@@ -5,12 +5,13 @@ import datetime
 import json
 import copy
 import re
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from langgraph.graph import StateGraph, END
 # from langgraph.checkpoint.memory import MemorySaver
+from backend.utils import create_output_session_dir
 from .utils.views import print_agent_output
 from ..memory.research import ResearchState
-from .utils.utils import sanitize_filename
 
 # Import agent classes
 from . import \
@@ -46,11 +47,11 @@ class ChiefEditorAgent:
         return int(time.time())
 
     def _create_output_directory(self):
-        output_dir = "./outputs/" + \
-            sanitize_filename(
-                f"run_{self.task_id}_{self.task.get('query')[0:40]}")
-
-        os.makedirs(output_dir, exist_ok=True)
+        query = str(self.task.get("query") or "workflow")
+        output_dir = create_output_session_dir(query)
+        task_path = Path(output_dir) / "task.json"
+        with open(task_path, "w", encoding="utf-8") as handle:
+            json.dump(self.task, handle, ensure_ascii=False, indent=2)
         return output_dir
 
     def _initialize_agents(self):

@@ -9,7 +9,7 @@ Query: AI对就业市场的影响
   BP4  每轮 reviewer 和 reviser 完成后 — 追加意见或放行
   BP5  最终 publisher 输出后 — 查看完整最终文档
 
-输出文件（均在 outputs/route_agent_test/<timestamp>/）：
+输出文件（均在 outputs/<timestamp>_<query>/）：
   report_v1_before_scraping_rerun.md
   report_v2_after_scraping_rerun_{section}.md
   report_v3_before_logic_challenge.md
@@ -19,7 +19,7 @@ Query: AI对就业市场的影响
   operation_log.jsonl        (精简版)
   operation_log_full.jsonl   (完整版)
   terminal_output.log        (终端完整输出)
-  run the script : uv run python outputs/route_agent_test/route_agent_test.py
+  run the script : uv run python outputs/route_agent_test.py
 
 """
 
@@ -40,21 +40,22 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 _SCRIPT_DIR   = Path(__file__).resolve().parent
-_PROJECT_ROOT = _SCRIPT_DIR.parent.parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dotenv import load_dotenv
 load_dotenv(_PROJECT_ROOT / ".env")
 
+from backend.utils import create_output_session_dir
 from gpt_researcher.utils.enum import Tone
 from multi_agents.agents import ChiefEditorAgent
 from multi_agents.route_agent import RoutedLLMInvoker, run_live_preflight, set_global_invoker
 
 # ── 输出目录 ─────────────────────────────────────────────────────────────────
+QUERY = "AI对就业市场的影响"
 _RUN_TS  = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-OUT_DIR  = _PROJECT_ROOT / "outputs" / "route_agent_test" / _RUN_TS
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR  = Path(create_output_session_dir(QUERY, base_dir=_SCRIPT_DIR, timestamp=_RUN_TS))
 
 ROUTE_LOG    = OUT_DIR / "route_decisions.log"
 WORKFLOW_LOG = OUT_DIR / "workflow.log"
@@ -495,7 +496,7 @@ async def manual_review_cycle(
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 async def run() -> None:
-    query = "AI对就业市场的影响"
+    query = QUERY
     wlog("=" * 70)
     wlog("TEST START", query=query, time=datetime.now().isoformat())
     wlog("=" * 70)

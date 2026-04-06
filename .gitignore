@@ -54,10 +54,9 @@ CURSOR_RULES.md
 # Runtime outputs
 multi_agents/agent_state.json
 .claude/settings.local.json
-outputs/route_agent_test/*.log
-outputs/route_agent_test/*.jsonl
-outputs/route_agent_test/*.json
-outputs/route_agent_test/run_*/
-outputs/route_agent_test/????-??-??_*/
-outputs/route_agent_test/initial_draft.md
-outputs/route_agent_test/final_draft.md
+outputs/20??-??-??_*/
+outputs/run_*/
+outputs/task_*.json
+outputs/task_*.md
+outputs/task_*.pdf
+outputs/task_*.docx

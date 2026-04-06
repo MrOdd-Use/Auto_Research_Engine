@@ -1,6 +1,14 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from multi_agents.agents.orchestrator import ChiefEditorAgent
+
+
+@pytest.fixture(autouse=True)
+def isolate_output_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
 
 
 class _FakeResearchAgent:
@@ -207,6 +215,18 @@ class _EchoClaimVerifier:
     def annotate_draft(self, draft, report):
         claim_text = report[0]["claim_text"] if report else ""
         return f"{draft}\n\nANNOTATED:{claim_text}"
+
+
+def test_default_output_dir_uses_single_session_folder():
+    task = {"query": "workflow rerun support"}
+
+    chief = ChiefEditorAgent(task)
+
+    output_dir = Path(chief.output_dir)
+    assert output_dir.parent == Path("outputs")
+    assert output_dir.name.endswith("_workflow rerun support")
+    assert (output_dir / "task.json").exists()
+    assert json.loads((output_dir / "task.json").read_text(encoding="utf-8")) == task
 
 
 @pytest.mark.asyncio

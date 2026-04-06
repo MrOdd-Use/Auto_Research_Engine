@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
+from backend.utils import create_output_session_dir
+
 from ..client import RouteAgentClient
 from ..invoker import RoutedLLMInvoker
 from ..models import RouteExecutionContext, RouteRequest
@@ -31,10 +33,12 @@ class ReferenceRouteAgentScenario:
     def __init__(
         self,
         *,
-        output_dir: str | Path = "outputs/route_agent_test",
+        output_dir: str | Path | None = None,
         seed: int = 20260329,
         client: RouteAgentClient | None = None,
     ) -> None:
+        if output_dir is None:
+            output_dir = create_output_session_dir("route-agent-reference")
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.seed = seed
@@ -458,7 +462,7 @@ class ReferenceRouteAgentScenario:
 
 async def run_reference_application(
     *,
-    output_dir: str | Path = "outputs/route_agent_test",
+    output_dir: str | Path | None = None,
     seed: int = 20260329,
 ) -> ScenarioArtifacts:
     scenario = ReferenceRouteAgentScenario(output_dir=output_dir, seed=seed)

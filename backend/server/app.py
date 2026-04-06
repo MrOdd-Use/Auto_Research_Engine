@@ -33,7 +33,7 @@ from backend.server.server_utils import (
     sanitize_filename,
 )
 from backend.server.websocket_manager import WebSocketManager, run_agent
-from backend.utils import write_md_to_pdf, write_md_to_word
+from backend.utils import create_output_session_dir, write_md_to_pdf, write_md_to_word, write_text_to_md
 from gpt_researcher.utils.enum import Tone
 
 logger = logging.getLogger(__name__)
@@ -281,11 +281,14 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         else str(report_result)
     )
 
-    docx_path = await write_md_to_word(report, research_id)
-    pdf_path = await write_md_to_pdf(report, research_id)
+    output_dir = create_output_session_dir(research_request.task)
+    md_path = await write_text_to_md(report, filename="report", output_dir=output_dir)
+    docx_path = await write_md_to_word(report, filename="report", output_dir=output_dir)
+    pdf_path = await write_md_to_pdf(report, filename="report", output_dir=output_dir)
     response = {
         "research_id": research_id,
         "report": report,
+        "md_path": md_path,
         "docx_path": docx_path,
         "pdf_path": pdf_path,
     }
