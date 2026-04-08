@@ -24,6 +24,7 @@ _LIVE_PROBE_PROMPT = (
 _LIVE_PROBE_OK_TTL_S = 900.0
 _LIVE_PROBE_FAIL_TTL_S = 300.0
 _LIVE_PROBE_DEFAULT_CONCURRENCY = 4
+_LIVE_PROBE_DEFAULT_TIMEOUT_S = 3.0
 
 # Canonical env-var map shared with live_preflight.py
 _PROVIDER_ENV_MAP: dict[str, tuple[str, ...]] = {
@@ -50,7 +51,7 @@ _PROVIDER_PACKAGE_MAP: dict[str, tuple[str, ...]] = {
 }
 
 # Relay-unavailable error string (hard-failure pattern for Chinese relay services)
-_NO_CHANNEL_MSG = "没有可用的渠道支持该模型"
+_NO_CHANNEL_MSG = "No available channel supports this model"
 
 
 def _provider_env_groups(provider: str) -> list[list[str]]:
@@ -204,8 +205,9 @@ class LiveProbeMixin:
                 await router_storage.mark_unable_async(model_id)
             return result
 
+        timeout_s = self._probe_timeout_s()
         try:
-            await self._live_probe_model_async(provider, model)
+            await asyncio.wait_for(self._live_probe_model_async(provider, model), timeout=timeout_s)
         except Exception as exc:  # noqa: BLE001
             hard_failure, skipped = self._classify_probe_error(exc)
             result = self._new_probe_result(
@@ -216,7 +218,7 @@ class LiveProbeMixin:
                 skipped=skipped,
                 hard_failure=hard_failure,
                 cached=False,
-                message=str(exc),
+                message=self._probe_error_message(exc, timeout_s=timeout_s),
             )
             self._write_cached_probe(model_id, result)
             if router_storage is not None and hard_failure and not skipped:
@@ -262,6 +264,8 @@ class LiveProbeMixin:
 
     def _classify_probe_error(self, exc: Exception) -> tuple[bool, bool]:
         """Classify a live-probe error into (hard_failure, skipped)."""
+        if self._is_timeout_probe_error(exc):
+            return False, True
         message = str(exc).lower()
         if "unsupported" in message and "provider" in message:
             return False, True
@@ -280,6 +284,22 @@ class LiveProbeMixin:
         if any(pattern in message for pattern in hard_patterns):
             return True, False
         return False, False
+
+    def _is_timeout_probe_error(self, exc: Exception) -> bool:
+        """Return whether the probe error indicates the probe timed out."""
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+            return True
+        message = str(exc).lower()
+        return "timed out" in message or "timeout" in message
+
+    def _probe_error_message(self, exc: Exception, *, timeout_s: float) -> str:
+        """Return a stable, non-empty message for one probe failure."""
+        message = str(exc).strip()
+        if message:
+            return message
+        if self._is_timeout_probe_error(exc):
+            return f"live probe timed out after {timeout_s:g}s"
+        return exc.__class__.__name__
 
     def _missing_env_error(self, provider: str) -> str | None:
         """Return a message when the provider's required env vars are absent."""
@@ -307,6 +327,19 @@ class LiveProbeMixin:
         if raw.isdigit():
             return max(1, int(raw))
         return _LIVE_PROBE_DEFAULT_CONCURRENCY
+
+    def _probe_timeout_s(self) -> float:
+        """Return the timeout used by startup live probes."""
+        raw = str(os.getenv("ROUTE_AGENT_LIVE_PROBE_TIMEOUT_S") or "").strip()
+        if not raw:
+            return _LIVE_PROBE_DEFAULT_TIMEOUT_S
+        try:
+            value = float(raw)
+        except ValueError:
+            return _LIVE_PROBE_DEFAULT_TIMEOUT_S
+        if value <= 0:
+            return _LIVE_PROBE_DEFAULT_TIMEOUT_S
+        return value
 
     def _new_probe_result(
         self,

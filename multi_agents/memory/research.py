@@ -34,3 +34,6 @@ class ResearchState(TypedDict):
     model_decisions: Optional[list]
     # Review diff tracking
     _draft_before_revision: Optional[str]
+    # Opinions tracking
+    review_opinions: Optional[list]   # serialized OpinionsStore records
+    force_publish: Optional[bool]     # human requested early stop

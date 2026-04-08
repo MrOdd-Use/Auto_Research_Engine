@@ -49,12 +49,13 @@ class ScrapingAgent:
         "ecommercefastlane.com",
     }
     DOMAIN_TO_ENGINES = {
-        "tech": ["arxiv", "semantic_scholar", "google"],
-        "medical": ["pubmed_central", "google", "bing"],
-        "finance": ["tavily", "google", "bing"],
-        "general": ["tavily", "google", "bing"],
+        "tech": ["arxiv", "semantic_scholar", "tavily"],
+        "medical": ["pubmed_central", "tavily"],
+        "finance": ["tavily"],
+        "general": ["tavily"],
     }
     VERTICAL_ENGINES = {"arxiv", "semantic_scholar", "pubmed_central"}
+    SEARCH_FALLBACK_ENGINES = ("tavily",)
     MODEL_LEVEL_FALLBACK = {
         1: "gpt-4o-mini",
         2: "gpt-4o",
@@ -679,7 +680,9 @@ class ScrapingAgent:
                 all_results.extend(results)
                 used_engines.add(engine)
             if failed and engine in self.VERTICAL_ENGINES:
-                for fallback_engine in ("google", "bing"):
+                for fallback_engine in self.SEARCH_FALLBACK_ENGINES:
+                    if fallback_engine in engines or fallback_engine in used_engines:
+                        continue
                     fallback_results, _ = await self._search_with_engine(
                         engine=fallback_engine,
                         query=target,

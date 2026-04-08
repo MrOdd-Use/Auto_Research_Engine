@@ -432,9 +432,9 @@ class CheckDataAgent:
         suggestion = feedback_packet.get("new_query_suggestion")
         return (
             f"### {topic}\n\n"
-            f"该章节证据不足，需人工复核（final_score={score}）。\n"
-            "系统在 3 轮核查后仍未满足最低置信门槛（0.7）。\n"
-            f"建议补充检索：{suggestion}\n"
+            f"Insufficient evidence for this section, requires manual review (final_score={score}).\n"
+            "System failed to meet the minimum confidence threshold (0.7) after 3 verification rounds.\n"
+            f"Suggested additional search: {suggestion}\n"
         ).strip()
 
     async def _emit_log(self, event: str, message: str) -> None:

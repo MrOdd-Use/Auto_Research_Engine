@@ -357,10 +357,10 @@ Return ONLY the JSON, no markdown fences.""",
 
             if not valid_ids:
                 confidence = "HALLUCINATION"
-                note = "无来源支持"
+                note = "No source support"
             elif len(domains) == 1:
                 confidence = "MEDIUM"
-                note = f"仅 {list(domains)[0]}"
+                note = f"Only {list(domains)[0]}"
             else:
                 # Check for conflicts
                 conflict = await self.detect_conflicts(claim, source_index, model)
@@ -406,11 +406,11 @@ Return ONLY the JSON, no markdown fences.""",
     def build_reflexion_note(self, claims: List[dict], source_index: dict) -> str:
         """Build a note string with conflict excerpts + disambiguation queries."""
         parts: List[str] = []
-        parts.append("以下声明存在来源冲突，需要补充搜索以消除矛盾：\n")
+        parts.append("The following claims have source conflicts requiring additional searches to resolve contradictions:\n")
 
         for i, claim in enumerate(claims, 1):
-            parts.append(f"{i}. 声明: \"{claim['claim_text']}\"")
-            parts.append(f"   冲突详情: {claim.get('note', '')}")
+            parts.append(f"{i}. Claim: \"{claim['claim_text']}\"")
+            parts.append(f"   Conflict detail: {claim.get('note', '')}")
 
             # Include conflicting excerpts
             for sid in claim.get("source_ids", [])[:4]:
@@ -418,7 +418,7 @@ Return ONLY the JSON, no markdown fences.""",
                 if info:
                     parts.append(f"   [{sid}]({info['domain']}): {info['content'][:150]}...")
 
-            parts.append(f"   建议搜索: \"{claim['claim_text']}\" actual verified official")
+            parts.append(f"   Suggested search: \"{claim['claim_text']}\" actual verified official")
             parts.append("")
 
         return "\n".join(parts)
@@ -447,11 +447,11 @@ Return ONLY the JSON, no markdown fences.""",
             clean_original = re.sub(r"\s+", " ", clean_original)
 
             if confidence == "HALLUCINATION":
-                replacement = "[该方面的知识无从得知——无可靠来源支持此断言]"
+                replacement = "[Knowledge unavailable — no reliable source supports this claim]"
             elif confidence == "SUSPICIOUS":
-                replacement = f"{clean_original} [来源冲突：不同渠道对此存在矛盾]"
+                replacement = f"{clean_original} [Source conflict: different sources contradict each other on this point]"
             elif confidence == "MEDIUM":
-                replacement = f"{clean_original} [单一来源]"
+                replacement = f"{clean_original} [Single source]"
             else:
                 replacement = clean_original
 
@@ -473,10 +473,10 @@ Return ONLY the JSON, no markdown fences.""",
             return ""
 
         confidence_map = {
-            "HIGH": "高",
-            "MEDIUM": "中等",
-            "SUSPICIOUS": "可疑",
-            "HALLUCINATION": "幻觉",
+            "HIGH": "High",
+            "MEDIUM": "Medium",
+            "SUSPICIOUS": "Suspicious",
+            "HALLUCINATION": "Hallucination",
         }
 
         rows: List[str] = []
@@ -494,12 +494,12 @@ Return ONLY the JSON, no markdown fences.""",
                 f"| {len(set(domains))} | {domain_str} | {note} |"
             )
 
-        table = "\n\n## 声明置信度报告\n\n"
-        table += "| # | 声明摘要 | 置信度 | 支持渠道 | 来源 | 备注 |\n"
-        table += "|---|----------|--------|---------|------|------|\n"
+        table = "\n\n## Claim Confidence Report\n\n"
+        table += "| # | Claim Summary | Confidence | Supporting Sources | Domain | Notes |\n"
+        table += "|---|---------------|------------|-------------------|--------|-------|\n"
         table += "\n".join(rows)
-        table += f"\n\n统计：高信任 {counts['HIGH']} | 中等 {counts['MEDIUM']}"
-        table += f" | 可疑 {counts['SUSPICIOUS']} | 幻觉 {counts['HALLUCINATION']}"
+        table += f"\n\nStats: High {counts['HIGH']} | Medium {counts['MEDIUM']}"
+        table += f" | Suspicious {counts['SUSPICIOUS']} | Hallucination {counts['HALLUCINATION']}"
         reflexion_note = ""
         table += reflexion_note
         table += "\n"

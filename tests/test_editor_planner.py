@@ -63,6 +63,38 @@ async def test_plan_research_falls_back_when_model_output_is_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_plan_research_includes_preclassified_query_intent(monkeypatch):
+    captured_prompt = {}
+
+    async def fake_call_model(*args, **kwargs):
+        captured_prompt["prompt"] = kwargs.get("prompt") or args[0]
+        return {
+            "title": "AI Strategy",
+            "date": "",
+            "sections": ["Market Drivers"],
+        }
+
+    monkeypatch.setattr(editor_module, "call_model", fake_call_model)
+
+    agent = EditorAgent()
+    research_state = {
+        "initial_research": "summary",
+        "task": {
+            "query": "How will AI reshape enterprise software?",
+            "query_intent": "analytical",
+            "max_sections": 1,
+            "model": "gpt-4o",
+        },
+    }
+
+    await agent.plan_research(research_state)
+
+    user_prompt = captured_prompt["prompt"][1]["content"]
+    assert "## Preclassified Query Intent" in user_prompt
+    assert "analytical" in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_run_parallel_research_uses_fallback_section_when_empty(monkeypatch):
     agent = EditorAgent()
 

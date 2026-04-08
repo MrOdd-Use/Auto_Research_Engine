@@ -1,7 +1,8 @@
+"""Publishing helpers for research report artifacts."""
+
 from .utils.file_formats import \
     write_md_to_pdf, \
-    write_md_to_word, \
-    write_text_to_md
+    write_md_to_word
 from .utils.output_writers import (
     collect_cited_ids_from_text,
     write_annotated_report,
@@ -12,13 +13,17 @@ from .utils.views import print_agent_output
 
 
 class PublisherAgent:
+    """Generate final report artifacts for a research session."""
+
     def __init__(self, output_dir: str, websocket=None, stream_output=None, headers=None):
+        """Initialize the publisher with an output directory and stream hooks."""
         self.websocket = websocket
         self.stream_output = stream_output
         self.output_dir = output_dir.strip()
         self.headers = headers or {}
         
     async def publish_research_report(self, research_state: dict, publish_formats: dict):
+        """Render the final layout and persist all report artifacts."""
         layout = self.generate_layout(research_state)
         await self.write_report_by_formats(layout, publish_formats)
 
@@ -41,6 +46,7 @@ class PublisherAgent:
         )
 
     def generate_layout(self, research_state: dict):
+        """Build the markdown layout for the final report."""
         final_draft = research_state.get("final_draft")
         if isinstance(final_draft, str) and final_draft.strip():
             return final_draft.strip()
@@ -77,15 +83,20 @@ class PublisherAgent:
 """
         return layout
 
-    async def write_report_by_formats(self, layout:str, publish_formats: dict):
+    async def write_report_by_formats(self, layout: str, publish_formats: dict):
+        """Write optional non-markdown export formats.
+
+        Markdown is persisted separately as the fixed `report.md` artifact via
+        `_write_structured_outputs`, so this method intentionally skips the
+        legacy random-stem markdown export.
+        """
         if publish_formats.get("pdf"):
             await write_md_to_pdf(layout, self.output_dir)
         if publish_formats.get("docx"):
             await write_md_to_word(layout, self.output_dir)
-        if publish_formats.get("markdown"):
-            await write_text_to_md(layout, self.output_dir)
 
     async def run(self, research_state: dict):
+        """Publish the current research state and return the report text."""
         task = research_state.get("task")
         publish_formats = task.get("publish_formats")
         if self.websocket and self.stream_output:

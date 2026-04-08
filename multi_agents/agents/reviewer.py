@@ -23,6 +23,26 @@ Evidence Sources (condensed):
 {sources_text}
 """
 
+AUDIT_INSTRUCTION = """
+## Opinion Item Audit
+
+The following opinion items have been accumulated over previous rounds, including
+items that were previously marked as resolved.
+Please re-audit every listed item against the current draft on every review pass:
+
+{tracked_items}
+
+For each item, note:
+- [Resolved] Item#N: draft has addressed this
+- [Unresolved] Item#N: issue still present
+- [Partially resolved] Item#N: draft improved it, but important parts are still missing
+- If a previously resolved item regressed in the latest draft, mark it as [Unresolved] or [Partially resolved]
+- Audit every listed Item#N in order and provide exactly one status line for each item before listing new issues
+
+After the audit, append any new issues found this round (if any), in the format:
+[New issue] Issue description
+"""
+
 FULL_DRAFT_SOURCE_VERIFY_INSTRUCTION = """
 ## Source Verification
 
@@ -92,6 +112,14 @@ Please provide additional feedback ONLY if critical since the reviser has alread
 If you think the article is sufficient or that non critical revisions are required, please aim to return None.
 """
 
+        # Build per-item audit block when previous opinions exist.
+        pending_items_text = draft_state.get("pending_opinions") or ""
+        audit_block = (
+            AUDIT_INSTRUCTION.format(tracked_items=pending_items_text)
+            if pending_items_text
+            else ""
+        )
+
         # Build source verification block if source evidence is available.
         source_verify_block = ""
         if source_index:
@@ -115,6 +143,7 @@ If the draft meets all the guidelines and all factual claims are supported, plea
 
 Guidelines: {guidelines}\nDraft: {current_draft}\n
 {source_verify_block}
+{audit_block}
 {note_block}
 """
         prompt = [

@@ -23,8 +23,15 @@ from . import \
     ReviewerAgent, \
     ReviserAgent
 from .claim_verifier import ClaimVerifierAgent
+from .intent_recognizer import IntentRecognizer
 
 from multi_agents.route_agent.invoker import get_global_invoker
+from multi_agents.memory.opinions import (
+    OpinionsStore,
+    annotate_rerun_nodes,
+    extract_new_issue_items,
+    parse_review_to_items,
+)
 from multi_agents.workflow_session import WorkflowSessionRecorder
 from .utils.output_writers import write_model_decisions
 
@@ -40,6 +47,7 @@ class ChiefEditorAgent:
         self.tone = tone
         self.task_id = self._generate_task_id()
         self.output_dir = str(output_dir) if output_dir else self._create_output_directory()
+        self.task_path = Path(self.output_dir) / "task.json"
         self._workflow_agents = {}
 
     def _generate_task_id(self):
@@ -53,6 +61,12 @@ class ChiefEditorAgent:
         with open(task_path, "w", encoding="utf-8") as handle:
             json.dump(self.task, handle, ensure_ascii=False, indent=2)
         return output_dir
+
+    def _persist_task_snapshot(self, task: Optional[dict] = None) -> None:
+        """Persist the latest task payload for replay and debugging."""
+        payload = task or self.task
+        with open(self.task_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     def _initialize_agents(self):
         return {
@@ -130,23 +144,75 @@ class ChiefEditorAgent:
 
     async def _run_final_reviewer(self, research_state: dict):
         reviewer = self._workflow_agents["reviewer"]
+        human = self._workflow_agents["human"]
         publisher = self._workflow_agents["publisher"]
+        task = research_state.get("task") or {}
+
         draft_text = self._normalize_draft_text(research_state.get("final_draft"))
         if not draft_text:
             draft_text = publisher.generate_layout(research_state)
 
+        opinions_store = OpinionsStore.from_records(research_state.get("review_opinions"))
+        round_num = (research_state.get("review_iterations") or 0) + 1
+        tracked_items = opinions_store.tracked_items()
+        pending_opinions_text = opinions_store.tracked_as_numbered_list()
+
         review_result = await reviewer.run(
             {
-                "task": research_state.get("task"),
+                "task": task,
                 "draft": draft_text,
                 "revision_notes": research_state.get("revision_notes"),
                 "source_index": research_state.get("source_index") or {},
                 "previous_draft": research_state.get("_draft_before_revision") or "",
+                "pending_opinions": pending_opinions_text,
             }
         )
+        agent_review = review_result.get("review")
+        opinions_store.apply_audit_results(agent_review, tracked_items)
+
+        # ── Human breakpoint ──────────────────────────────────────────────
+        force_stop = False
+        human_items = None
+        if agent_review:
+            human_items, force_stop = await human.collect_review_feedback(
+                agent_review, draft_text, task
+            )
+
+        if force_stop:
+            opinions_store.save(self.output_dir)
+            print_agent_output("Human requested stop — force publishing.", agent="REVIEWER")
+            return {
+                "review": None,
+                "final_draft": draft_text,
+                "review_opinions": opinions_store.to_records(),
+            }
+
+        # ── Merge and persist ─────────────────────────────────────────────
+        if agent_review and tracked_items:
+            agent_items = extract_new_issue_items(agent_review)
+        else:
+            agent_items = parse_review_to_items(agent_review) if agent_review else []
+        if agent_items or human_items:
+            new_round = opinions_store.append_round(round_num, agent_items, human_items or [])
+            # Annotate each opinion item with the rerun node it requires
+            try:
+                await annotate_rerun_nodes(new_round, draft_text, task)
+            except Exception as exc:
+                print(f"[rerun_annotator] skipped: {exc}", flush=True)
+
+        opinions_store.save(self.output_dir)
+
+        merged_review = agent_review or ""
+        if human_items:
+            human_block = "\n".join(f"- {item}" for item in human_items)
+            merged_review = f"{merged_review}\n\n[Human additional opinions]\n{human_block}"
+
+        remaining_opinions = opinions_store.pending_items()
+
         return {
-            "review": review_result.get("review"),
+            "review": merged_review if remaining_opinions else None,
             "final_draft": draft_text,
+            "review_opinions": opinions_store.to_records(),
         }
 
     async def _run_final_reviser(self, research_state: dict):
@@ -157,12 +223,16 @@ class ChiefEditorAgent:
         if not current_draft:
             current_draft = publisher.generate_layout(research_state)
 
+        opinions_store = OpinionsStore.from_records(research_state.get("review_opinions"))
+
         revision_result = await reviser.run(
             {
                 "task": research_state.get("task"),
                 "draft": current_draft,
                 "review": research_state.get("review"),
                 "revision_notes": research_state.get("revision_notes"),
+                "pending_opinions": opinions_store.pending_as_numbered_list(),
+                "resolved_opinions": opinions_store.resolved_as_numbered_list(),
             }
         )
 
@@ -181,6 +251,57 @@ class ChiefEditorAgent:
             "suspicious_claims": [],
             "hallucinated_claims": [],
         }
+
+    async def _execute_pending_reruns(
+        self,
+        state: Dict[str, Any],
+        recorder: "WorkflowSessionRecorder | None",
+    ) -> Dict[str, Any]:
+        """
+        After each reviser pass, check whether any pending opinion items require a
+        node rerun (researcher → fresh data; writer → regenerate draft).
+        Reruns are executed once, then their rerun_node tag is cleared so the next
+        reviewer round can audit whether the items were actually resolved.
+        """
+        opinions_store = OpinionsStore.from_records(state.get("review_opinions"))
+        rerun_nodes = opinions_store.pending_rerun_nodes()
+        if not rerun_nodes:
+            return state
+
+        ran_researcher = False
+
+        if "researcher" in rerun_nodes:
+            reasons = rerun_nodes["researcher"]
+            note = "Re-scrape requested by review opinions: " + "; ".join(reasons[:3])
+            print_agent_output(
+                f"Rerunning researcher node ({len(reasons)} opinion(s) require fresh data).",
+                agent="REVIEWER",
+            )
+            state = await self._run_researcher(state, recorder, note=note)
+            state = await self._inject_source_index(state)
+            ran_researcher = True
+
+        if ran_researcher or "writer" in rerun_nodes:
+            writer_reasons = rerun_nodes.get("writer", [])
+            note = (
+                "Regenerating draft after data rerun."
+                if ran_researcher
+                else "Writer rerun requested: " + "; ".join(writer_reasons[:3])
+            )
+            print_agent_output("Rerunning writer node after data/structure rerun.", agent="REVIEWER")
+            state = await self._run_global_node(
+                "writer",
+                self._workflow_agents["writer"].run,
+                state,
+                recorder,
+                note=note,
+            )
+
+        # Clear the rerun tags so they won't re-trigger on the next cycle
+        opinions_store.mark_reruns_done()
+        state["review_opinions"] = opinions_store.to_records()
+        opinions_store.save(self.output_dir)
+        return state
 
     async def _annotate_if_needed(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Refresh claim verification if needed, then annotate the final draft."""
@@ -201,6 +322,12 @@ class ChiefEditorAgent:
         if isinstance(draft, str):
             return draft.strip()
         if isinstance(draft, dict):
+            # Prefer extracting the actual text over serializing to JSON,
+            # which would corrupt the report layout.
+            for key in ("draft", "content", "report", "text", "markdown"):
+                value = draft.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
             return json.dumps(draft, ensure_ascii=False, indent=2)
         if isinstance(draft, list):
             return "\n".join(str(item) for item in draft)
@@ -363,6 +490,36 @@ class ChiefEditorAgent:
         else:
             print_agent_output(message, "MASTER")
 
+    async def _ensure_query_intent(
+        self,
+        task: Dict[str, Any],
+        *,
+        start_node: str,
+    ) -> None:
+        """Populate query intent metadata once the user query is available."""
+        if start_node not in {"browser", "planner", "human", "researcher"}:
+            return
+
+        query = str(task.get("query") or "").strip()
+        if not query or str(task.get("query_intent") or "").strip():
+            return
+
+        try:
+            analysis = await IntentRecognizer().analyze_query(query)
+        except Exception as exc:
+            print(
+                f"[Intent Recognition] Query analysis failed, continuing with raw query: {exc}",
+                flush=True,
+            )
+            return
+
+        task["query_intent"] = analysis.get("query_intent") or "exploratory"
+        task["normalized_query"] = analysis.get("normalized_query") or query
+        if analysis.get("research_goal"):
+            task["research_goal"] = analysis["research_goal"]
+        self.task = task
+        self._persist_task_snapshot(task)
+
     async def _run_global_node(
         self,
         node_name: str,
@@ -505,6 +662,10 @@ class ChiefEditorAgent:
                 note=pending_reviser_note,
             )
             pending_reviser_note = None
+
+            # ── Execute node reruns required by pending opinion items ──────
+            state = await self._execute_pending_reruns(state, recorder)
+
             if self._is_review_cap_reached(state):
                 break
             current_node = "reviewer"
@@ -926,8 +1087,6 @@ class ChiefEditorAgent:
         agents = self._initialize_agents()
         self._workflow_agents = agents
 
-        await self._log_research_start()
-
         # Collect route decisions via event_logger wrapper
         decisions: List[Dict[str, Any]] = []
         invoker = get_global_invoker()
@@ -942,6 +1101,10 @@ class ChiefEditorAgent:
         invoker.event_logger = _collecting_logger
 
         base_state = initial_state or {"task": copy.deepcopy(self.task)}
+        task = base_state.setdefault("task", copy.deepcopy(self.task))
+        self.task = task
+        await self._ensure_query_intent(task, start_node=start_node)
+        await self._log_research_start()
         try:
             result = await self._execute_workflow(
                 initial_state=base_state,

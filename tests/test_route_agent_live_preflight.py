@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -9,7 +10,30 @@ from multi_agents.route_agent.client import RouteAgentClient
 from multi_agents.route_agent.models import RouteExecutionContext, RouteRequest
 from multi_agents.route_agent.tools import live_preflight as live_preflight_module
 from multi_agents.route_agent.tools.external_bridge import ExternalRouteAgentBridge
+from multi_agents.route_agent.tools.live_probe import LiveProbeMixin
 from multi_agents.route_agent.tools.live_preflight import run_live_preflight
+
+
+class _SlowProbeHarness(LiveProbeMixin):
+    """Small LiveProbeMixin harness for timeout-path tests."""
+
+    def __init__(self):
+        self._init_probe_cache()
+
+    def describe_global_pool(self):
+        """Return one synthetic model entry for probe tests."""
+        return [
+            {
+                "model_id": "synthetic:slow-model",
+                "provider": "synthetic",
+                "model": "slow-model",
+            }
+        ]
+
+    async def _live_probe_model_async(self, provider: str, model: str) -> str:
+        """Delay long enough for the configurable probe timeout to fire."""
+        await asyncio.sleep(0.05)
+        return f"{provider}:{model}"
 
 
 def test_default_model_pool_prefers_configured_models(monkeypatch):
@@ -201,6 +225,20 @@ def test_grouped_relay_provider_reuses_global_api_key(monkeypatch):
         "RELAY_CC_GLM_API_KEY or RELAY_API_KEY",
     ]
     assert check["present_envs"] == ["RELAY_CC_GLM_BASE_URL", "RELAY_API_KEY"]
+
+
+@pytest.mark.asyncio
+async def test_live_probe_timeout_uses_configured_threshold_and_non_empty_message(monkeypatch):
+    monkeypatch.setenv("ROUTE_AGENT_LIVE_PROBE_TIMEOUT_S", "0.01")
+
+    harness = _SlowProbeHarness()
+    results = await harness.probe_global_pool_async(force=True, mark_unavailable=False)
+
+    assert len(results) == 1
+    assert results[0]["ok"] is False
+    assert results[0]["skipped"] is True
+    assert results[0]["hard_failure"] is False
+    assert results[0]["message"] == "live probe timed out after 0.01s"
 
 
 def test_external_bridge_normalizes_fully_qualified_requested_model():

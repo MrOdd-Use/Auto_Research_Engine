@@ -81,9 +81,15 @@ class EditorAgent:
         human_feedback = research_state.get("human_feedback")
         max_sections = self._normalize_max_sections(task.get("max_sections"))
         query = task.get("query", "")
+        query_intent = str(task.get("query_intent") or "").strip().lower()
 
         prompt = self._create_planning_prompt(
-            query, initial_research, include_human_feedback, human_feedback, max_sections,
+            query,
+            initial_research,
+            include_human_feedback,
+            human_feedback,
+            max_sections,
+            query_intent,
         )
 
         print_agent_output(
@@ -218,6 +224,7 @@ class EditorAgent:
         include_human_feedback: bool,
         human_feedback: Optional[str],
         max_sections: int,
+        query_intent: str = "",
     ) -> List[Dict[str, str]]:
         """Create the prompt for structured research planning."""
         return [
@@ -225,8 +232,12 @@ class EditorAgent:
             {
                 "role": "user",
                 "content": self._format_planning_instructions(
-                    query, initial_research, include_human_feedback,
-                    human_feedback, max_sections,
+                    query,
+                    initial_research,
+                    include_human_feedback,
+                    human_feedback,
+                    max_sections,
+                    query_intent,
                 ),
             },
         ]
@@ -238,6 +249,7 @@ class EditorAgent:
         include_human_feedback: bool,
         human_feedback: Optional[str],
         max_sections: int,
+        query_intent: str = "",
     ) -> str:
         """Format chain-of-thought planning instructions."""
         today = datetime.now().strftime('%d/%m/%Y')
@@ -249,10 +261,18 @@ class EditorAgent:
                 "You must incorporate this feedback into your outline.\n"
             )
 
+        intent_block = ""
+        if query_intent:
+            intent_block = (
+                f"\n## Preclassified Query Intent\n{query_intent}\n"
+                "Reuse this intent classification when designing the outline unless the query text clearly contradicts it.\n"
+            )
+
         return f"""Today's date is {today}.
 
 ## Original Research Query
 "{query}"
+{intent_block}
 
 ## Initial Research Summary
 {initial_research}

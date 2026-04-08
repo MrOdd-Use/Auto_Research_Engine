@@ -112,7 +112,10 @@ async def generate_sub_queries(
                 **kwargs
             )
 
-    return json_repair.loads(response)
+    result = json_repair.loads(response)
+    if isinstance(result, list):
+        return result
+    return [str(result)] if result else []
 
 async def plan_research_outline(
     query: str,

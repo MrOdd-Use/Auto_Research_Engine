@@ -16,7 +16,7 @@ from ..models import RouteExecutionContext, RouteRequest
 from ..storage.operation_logger import OperationLogger
 
 
-QUERY = "ai对就业市场的影响"
+QUERY = "impact of ai on the job market"
 APPLICATION_NAME = "auto_research_engine"
 
 
@@ -350,10 +350,10 @@ class ReferenceRouteAgentScenario:
         if agent_role == "planner":
             return {
                 "sections": [
-                    "就业结构重塑",
-                    "岗位两极分化",
-                    "技能迁移与再培训",
-                    "区域与行业分化",
+                    "Labor Market Restructuring",
+                    "Job Polarization",
+                    "Skill Transition and Retraining",
+                    "Regional and Industry Divergence",
                 ],
                 "model_used": selected_model,
             }
@@ -362,18 +362,18 @@ class ReferenceRouteAgentScenario:
             index = int(payload.get("revision_index") or 0)
             section = sections[index]
             return {
-                "revised_section": f"{section}与政策响应",
+                "revised_section": f"{section} and Policy Response",
                 "model_used": selected_model,
             }
         if agent_role == "section_researcher":
-            section = str(payload.get("section") or "未命名章节")
+            section = str(payload.get("section") or "Unnamed Section")
             challenge = payload.get("challenge")
-            suffix = "补充了更强的证据链与反例说明。" if challenge else "给出趋势、风险和岗位样本。"
+            suffix = "Supplemented with stronger evidence chains and counter-examples." if challenge else "Covers trends, risks, and job sample data."
             return {
                 "content": (
                     f"## {section}\n"
-                    f"- AI 正在重塑 {section} 对应的岗位任务边界，企业更偏好能协同使用自动化工具的人才。\n"
-                    f"- 在高重复工作中，岗位会被拆解并重组；在复杂岗位中，人机协作能力成为增值项。\n"
+                    f"- AI is reshaping the task boundaries of roles in {section}; firms increasingly prefer talent that can collaborate with automation tools.\n"
+                    f"- In high-repetition roles, jobs are decomposed and restructured; in complex roles, human-AI collaboration becomes a value-add.\n"
                     f"- {suffix}\n"
                 ),
                 "model_used": selected_model,
@@ -387,19 +387,19 @@ class ReferenceRouteAgentScenario:
             if challenge:
                 challenge_note = f"\n> 已响应质疑：{challenge.get('question')}\n"
             intro = (
-                "# AI对就业市场的影响\n\n"
-                "## 引言\n"
-                "AI 对就业市场的影响并不是简单的岗位替代，而是岗位重组、技能迁移和组织流程再设计的叠加效应。"
+                "# Impact of AI on the Job Market\n\n"
+                "## Introduction\n"
+                "The impact of AI on the job market is not simply job displacement, but a compound effect of job restructuring, skill migration, and organizational process redesign."
             )
-            body = "\n\n".join(section_bodies.get(section, f"## {section}\n- 待补充") for section in sections)
+            body = "\n\n".join(section_bodies.get(section, f"## {section}\n- To be supplemented") for section in sections)
             conclusion = (
-                "\n\n## 结论\n"
-                "更稳健的判断是：AI 会扩大岗位分化，抬高技能迁移速度，并迫使企业与政策系统同步调整培训和安全网。"
+                "\n\n## Conclusion\n"
+                "A more robust assessment is that AI will widen job polarization, accelerate skill transition, and force enterprises and policy systems to simultaneously adjust training and safety nets."
             )
             if revision_round >= 1:
-                conclusion += "\n修订版进一步强调了证据边界、行业差异与政策响应。"
+                conclusion += "\nThe revised version further emphasizes evidence boundaries, industry differences, and policy responses."
             if revision_round >= 2:
-                conclusion += "\n同时补充了对中短期冲击与长期生产率收益之间张力的讨论。"
+                conclusion += "\nIt also adds discussion of the tension between short-to-medium-term shocks and long-term productivity gains."
             return {
                 "markdown": f"{intro}\n\n{body}{challenge_note}{conclusion}\n",
                 "model_used": selected_model,
@@ -407,7 +407,7 @@ class ReferenceRouteAgentScenario:
         if agent_role == "reviewer":
             phase = str(payload.get("phase") or "")
             if phase == "initial":
-                review = "需要加强对岗位两极分化与政策响应的证据衔接。"
+                review = "Evidence linking job polarization to policy responses needs strengthening."
             else:
                 review = None
             return {"review": review, "model_used": selected_model}
@@ -420,7 +420,11 @@ class ReferenceRouteAgentScenario:
                     {
                         "challenge_id": f"challenge_{idx}",
                         "section": sections[pick],
-                        "question": f"请质疑章节“{sections[pick]}”中关于 AI 对就业影响的证据是否足够具体。",
+                        "question": (
+                            f"Please challenge whether the evidence in section "
+                            f"'{sections[pick]}' regarding AI's impact on employment "
+                            f"is sufficiently specific."
+                        ),
                     }
                 )
             self.logger.log(
@@ -436,9 +440,9 @@ class ReferenceRouteAgentScenario:
         if agent_role == "reviser":
             draft = str(payload.get("draft") or "")
             review = str(payload.get("review") or "").strip()
-            addition = "\n\n## 修订说明\n- 已根据质疑补强证据链。\n- 已对存在歧义的判断补充边界条件。"
+            addition = "\n\n## Revision Notes\n- Evidence chain strengthened based on challenges.\n- Boundary conditions added for ambiguous judgments."
             if review:
-                addition += f"\n- 审阅备注：{review}"
+                addition += f"\n- Review note: {review}"
             return {"markdown": f"{draft}{addition}\n", "model_used": selected_model}
         return {"text": json.dumps(payload, ensure_ascii=False), "model_used": selected_model}
 

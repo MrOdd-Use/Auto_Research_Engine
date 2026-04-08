@@ -67,7 +67,9 @@ async def test_scraping_round2_domain_routing(tmp_path, monkeypatch):
     )
 
     assert result["scraping_packet"]["iteration_index"] == 2
-    assert result["scraping_packet"]["active_engines"] == ["arxiv", "google", "semantic_scholar"]
+    assert result["scraping_packet"]["active_engines"] == ["arxiv", "semantic_scholar", "tavily"]
+    assert "google" not in result["scraping_packet"]["active_engines"]
+    assert "bing" not in result["scraping_packet"]["active_engines"]
 
 
 def test_url_set_union_dedup(tmp_path, monkeypatch):
@@ -132,8 +134,9 @@ async def test_fallback_on_vertical_engine_failure(tmp_path, monkeypatch):
         query_domains=[],
         max_results=3,
     )
-    assert "google" in used_engines
-    assert "bing" in used_engines
+    assert "tavily" in used_engines
+    assert "google" not in used_engines
+    assert "bing" not in used_engines
 
 
 @pytest.mark.asyncio

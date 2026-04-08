@@ -6,6 +6,13 @@ from multi_agents.agents.reviewer import (
     _extract_changed_paragraphs,
     _build_condensed_sources,
 )
+from multi_agents.memory.opinions import (
+    OpinionsStore,
+    STATUS_PARTIALLY_RESOLVED,
+    STATUS_RESOLVED,
+    STATUS_UNRESOLVED,
+    extract_new_issue_items,
+)
 
 
 @pytest.fixture
@@ -187,6 +194,59 @@ class TestReviewerRun:
         prompt_content = call_args[0][0][1]["content"]
         assert "Source Verification" in prompt_content
         assert "Review the full draft above" in prompt_content
+
+
+class TestOpinionAuditParsing:
+    def test_apply_audit_results_updates_statuses(self):
+        store = OpinionsStore()
+        store.append_round(1, ["Need more evidence", "Rewrite intro"], [])
+        tracked_items = store.tracked_items()
+
+        store.apply_audit_results(
+            "[Resolved] Item#1: evidence added\n"
+            "[Partially resolved] Item#2: intro improved but still weak\n",
+            tracked_items,
+        )
+
+        records = store.to_records()
+        assert records[0]["items"][0]["status"] == STATUS_RESOLVED
+        assert records[0]["items"][1]["status"] == STATUS_PARTIALLY_RESOLVED
+
+    def test_apply_audit_results_defaults_unmentioned_items_to_unresolved(self):
+        store = OpinionsStore()
+        store.append_round(1, ["Need more evidence", "Rewrite intro"], [])
+        tracked_items = store.tracked_items()
+
+        store.apply_audit_results("[Resolved] Item#1: fixed", tracked_items)
+
+        records = store.to_records()
+        assert records[0]["items"][0]["status"] == STATUS_RESOLVED
+        assert records[0]["items"][1]["status"] == STATUS_UNRESOLVED
+
+    def test_apply_audit_results_can_reopen_resolved_items(self):
+        store = OpinionsStore()
+        store.append_round(1, ["Need more evidence"], [])
+        store.apply_audit_results(None, store.tracked_items())
+
+        store.apply_audit_results(
+            "[Unresolved] Item#1: the supporting source disappeared after later edits",
+            store.tracked_items(),
+        )
+
+        records = store.to_records()
+        assert records[0]["items"][0]["status"] == STATUS_UNRESOLVED
+
+    def test_extract_new_issue_items_keeps_explicit_new_issues(self):
+        issues = extract_new_issue_items(
+            "[Resolved] Item#1: fixed\n"
+            "[New issue] Add a fresher source for the labor statistics.\n"
+            "[HALLUCINATION] \"The unemployment rate doubled\" — no source supports this.\n"
+        )
+
+        assert issues == [
+            "[New issue] Add a fresher source for the labor statistics.",
+            "[HALLUCINATION] \"The unemployment rate doubled\" — no source supports this.",
+        ]
 
     @pytest.mark.asyncio
     @patch("multi_agents.agents.reviewer.call_model", new_callable=AsyncMock)

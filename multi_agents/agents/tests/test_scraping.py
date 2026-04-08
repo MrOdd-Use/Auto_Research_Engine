@@ -371,8 +371,9 @@ class TestEngineSelection:
 
     def test_iteration_2_with_tech_topic(self):
         engines = self.agent._select_engines(2, "LLM cloud GPU model")
-        assert len(engines) > 0  # uses domain-based selection
-        assert "tavily" not in engines or "arxiv" in engines or "google" in engines
+        assert engines == ["arxiv", "semantic_scholar", "tavily"]
+        assert "google" not in engines
+        assert "bing" not in engines
 
     def test_classify_medical(self):
         assert self.agent._classify_domain("medical clinical drug patient") == "medical"

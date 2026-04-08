@@ -2,6 +2,12 @@ import asyncio
 import json
 from typing import Any, Optional
 
+from .intent_recognizer import IntentRecognizer
+
+_STOP_WORDS = frozenset({
+    "stop", "skip", "done", "finish", "force publish",
+})
+
 
 class HumanAgent:
     def __init__(self, websocket=None, stream_output=None, headers=None):
@@ -19,7 +25,6 @@ class HumanAgent:
         user_feedback = None
 
         if task.get("include_human_feedback"):
-            # Stream response to the user if a websocket is provided (such as from web app)
             if self.websocket and self.stream_output:
                 try:
                     await self.stream_output(
@@ -33,20 +38,73 @@ class HumanAgent:
                         ),
                         self.websocket,
                     )
-                    user_feedback = await self._receive_feedback()
+                    raw = await self._receive_feedback()
+                    user_feedback = await self._expand_and_confirm_ws(raw, display)
                 except Exception as e:
                     print(f"Error receiving human feedback: {e}", flush=True)
-            # Otherwise, prompt the user for feedback in the console
             else:
-                user_feedback = input(
-                    f"Any feedback on this research outline?\n\n{display}\n\nIf not, please reply with 'no'.\n>> "
+                print(
+                    (
+                        "Any feedback on this research outline?\n\n"
+                        f"{display}\n\n"
+                        "If not, please reply with 'no'."
+                    ),
+                    flush=True,
                 )
+                raw = input(">> ")
+                user_feedback = await self._expand_and_confirm_console(raw, display)
 
         user_feedback = self._normalize_feedback(user_feedback)
 
-        print(f"User feedback before return: {user_feedback}", flush=True)
+        feedback_log = "None" if user_feedback is None else "[provided]"
+        print(f"User feedback before return: {feedback_log}", flush=True)
 
         return {"human_feedback": user_feedback}
+
+    async def _expand_and_confirm_console(self, raw: str | None, outline: str) -> str | None:
+        """Expand raw feedback via LLM and confirm with user in console mode."""
+        normalized = self._normalize_feedback(raw)
+        if normalized is None:
+            return raw  # "no" or empty — skip expansion
+
+        print("\n[Intent Recognition] Analyzing your revision feedback...\n", flush=True)
+        try:
+            expanded = await IntentRecognizer().expand(normalized, outline)
+        except Exception as e:
+            print(f"[Intent Recognition] Expansion failed, using original input: {e}", flush=True)
+            return raw
+
+        print(f"[Expanded Revision Instruction]\n{'-' * 60}\n{expanded}\n{'-' * 60}\n", flush=True)
+        confirm = input("Confirm the revision above? [Enter to confirm / type to override]\n>> ").strip()
+        return confirm if confirm else expanded
+
+    async def _expand_and_confirm_ws(self, raw: str | None, outline: str) -> str | None:
+        """Expand raw feedback via LLM and confirm with user in websocket mode."""
+        normalized = self._normalize_feedback(raw)
+        if normalized is None:
+            return raw
+
+        try:
+            expanded = await IntentRecognizer().expand(normalized, outline)
+        except Exception as e:
+            print(f"[Intent Recognition] Expansion failed, using original input: {e}", flush=True)
+            return raw
+
+        await self.stream_output(
+            "human_feedback",
+            "intent_expanded",
+            (
+                f"I've expanded your feedback into a detailed revision instruction:\n\n"
+                f"{expanded}\n\n"
+                "Reply 'ok' to confirm, or type new content to override."
+            ),
+            self.websocket,
+        )
+        confirm_raw = await self._receive_feedback()
+        confirm = self._normalize_feedback(confirm_raw)
+        if confirm is None or confirm.lower() in {"ok", "yes", "confirm"}:
+            return expanded
+        return confirm
 
     async def _receive_feedback(self) -> Optional[str]:
         """Receive human feedback from queue (preferred) or websocket text."""
@@ -70,10 +128,6 @@ class HumanAgent:
                 return parsed
 
     def _get_raw_websocket(self):
-        """
-        Resolve the underlying websocket object.
-        In server mode, self.websocket is a CustomLogsHandler that wraps .websocket.
-        """
         if self.websocket is None:
             return None
         return getattr(self.websocket, "websocket", self.websocket)
@@ -87,33 +141,26 @@ class HumanAgent:
         return queue if isinstance(queue, asyncio.Queue) else None
 
     def _extract_feedback_content(self, payload: Any) -> Optional[str]:
-        """Extract human feedback content from a websocket payload."""
         if payload is None:
             return None
-
         if isinstance(payload, dict):
             if payload.get("type") == "human_feedback":
                 return self._clean_feedback(payload.get("content"))
             if "content" in payload:
                 return self._clean_feedback(payload.get("content"))
             return self._clean_feedback(str(payload))
-
         if not isinstance(payload, str):
             return self._clean_feedback(str(payload))
-
         text = payload.strip()
         if not text:
             return None
-
         if text == "ping":
             return None
-
         if text.startswith("human_feedback"):
             remaining = text[len("human_feedback"):].strip()
             if not remaining:
                 return None
             text = remaining
-
         try:
             parsed = json.loads(text)
             return self._extract_feedback_content(parsed)
@@ -131,19 +178,113 @@ class HumanAgent:
     def _normalize_feedback(feedback: Optional[str]) -> Optional[str]:
         if feedback is None:
             return None
-
         cleaned = feedback.strip()
         if not cleaned:
             return None
-
         if cleaned.lower() in {"no", "n", "none", "null", "skip"}:
             return None
-
         return cleaned
+
+    async def collect_review_feedback(
+        self, review_text: str, draft_text: str, task: dict
+    ) -> tuple:
+        """
+        Show reviewer feedback, collect human opinions with intent expansion + confirmation.
+
+        Returns (list[str] | None, force_stop: bool).
+        force_stop=True means skip remaining review rounds and publish immediately.
+        """
+        if not task.get("include_human_feedback"):
+            return None, False
+
+        display = (
+            f"[Reviewer feedback]\n{'-' * 60}\n{review_text}\n{'-' * 60}\n\n"
+            "Please enter your additional opinions (one per line for multiple).\n"
+            "Enter 'no' to skip; enter 'stop' to force end revisions and publish immediately."
+        )
+
+        if self.websocket and self.stream_output:
+            try:
+                await self.stream_output(
+                    "human_feedback", "review_request", display, self.websocket
+                )
+                raw = await self._receive_feedback()
+            except Exception as e:
+                print(f"Error receiving review feedback: {e}", flush=True)
+                return None, False
+            return await self._process_review_input_ws(raw, review_text, draft_text)
+        else:
+            print(f"\n{display}\n", flush=True)
+            raw = input(">> ").strip()
+            return await self._process_review_input_console(raw, review_text, draft_text)
+
+    async def _process_review_input_console(
+        self, raw: str, review_text: str, draft_text: str
+    ) -> tuple:
+        normalized = self._normalize_feedback(raw)
+        if normalized is None:
+            return None, False
+        if normalized.lower() in _STOP_WORDS:
+            print("\n[Checkpoint] Received stop signal, skipping remaining review rounds, entering publish stage.\n", flush=True)
+            return None, True
+
+        lines = [ln.strip() for ln in normalized.splitlines() if ln.strip()]
+        expanded_items = []
+        recognizer = IntentRecognizer()
+        for line in lines:
+            print(f"\n[Intent Recognition] Analyzing: {line[:80]}...\n", flush=True)
+            try:
+                expanded = await recognizer.expand_review_feedback(line, review_text, draft_text)
+            except Exception as e:
+                print(f"[Intent Recognition] Failed, using original input: {e}", flush=True)
+                expanded = line
+            print(f"[Expanded]\n{'-' * 60}\n{expanded}\n{'-' * 60}\n", flush=True)
+            confirm = input("Confirm this opinion? [Enter to confirm / type to override]\n>> ").strip()
+            expanded_items.append(confirm if confirm else expanded)
+
+        return (expanded_items if expanded_items else None), False
+
+    async def _process_review_input_ws(
+        self, raw: Optional[str], review_text: str, draft_text: str
+    ) -> tuple:
+        normalized = self._normalize_feedback(raw)
+        if normalized is None:
+            return None, False
+        if normalized.lower() in _STOP_WORDS:
+            await self.stream_output(
+                "human_feedback", "force_publish",
+                "Received stop signal, skipping remaining review rounds, entering publish stage.",
+                self.websocket,
+            )
+            return None, True
+
+        lines = [ln.strip() for ln in normalized.splitlines() if ln.strip()]
+        expanded_items = []
+        recognizer = IntentRecognizer()
+        for line in lines:
+            try:
+                expanded = await recognizer.expand_review_feedback(line, review_text, draft_text)
+            except Exception:
+                expanded = line
+            await self.stream_output(
+                "human_feedback", "review_intent_expanded",
+                (
+                    f"Expanded review opinion:\n\n{expanded}\n\n"
+                    "Reply 'ok' to confirm, or type new content to override."
+                ),
+                self.websocket,
+            )
+            confirm_raw = await self._receive_feedback()
+            confirm = self._normalize_feedback(confirm_raw)
+            if confirm is None or confirm.lower() in {"ok", "yes", "confirm"}:
+                expanded_items.append(expanded)
+            else:
+                expanded_items.append(confirm)
+
+        return (expanded_items if expanded_items else None), False
 
     @staticmethod
     def _format_outline(section_details: list) -> str:
-        """Format enriched section details into a readable numbered outline."""
         lines = []
         for i, section in enumerate(section_details, 1):
             lines.append(f"{i}. {section.get('header', 'Untitled')}")

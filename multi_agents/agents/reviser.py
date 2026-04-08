@@ -1,14 +1,11 @@
 from .utils.views import print_agent_output
 from .utils.llms import call_model
-import json
 from multi_agents.route_agent import build_route_context
 
 sample_revision_notes = """
 {
-  "draft": { 
-    draft title: The revised draft that you are submitting for review 
-  },
-  "revision_notes": Your message to the reviewer about the changes you made to the draft based on their feedback
+  "draft": "The complete revised draft in full markdown format",
+  "revision_notes": "Your message to the reviewer about the changes you made to the draft based on their feedback"
 }
 """
 
@@ -38,6 +35,20 @@ class ReviserAgent:
             if checkpoint_note
             else ""
         )
+        pending_opinions = draft_state.get("pending_opinions") or ""
+        opinions_block = (
+            f"\n## Opinion Items (please address each one, do not skip)\n\n{pending_opinions}\n\n"
+            "After addressing each item, briefly note the location and method of revision in revision_notes.\n"
+            if pending_opinions
+            else ""
+        )
+        resolved_opinions = draft_state.get("resolved_opinions") or ""
+        resolved_block = (
+            f"\n## Previously Resolved Opinion Items\n\n{resolved_opinions}\n\n"
+            "Do not regress these already-satisfied requirements while revising the draft.\n"
+            if resolved_opinions
+            else ""
+        )
         prompt = [
             {
                 "role": "system",
@@ -50,7 +61,8 @@ class ReviserAgent:
 
 Reviewer's notes:
 {review}
-
+{opinions_block}
+{resolved_block}
 You have been tasked by your reviewer with revising the following draft, which was written by a non-expert.
 If you decide to follow the reviewer's notes, please write a new draft and make sure to address all of the points they raised.
 Please preserve the existing report structure and section headings unless the reviewer explicitly asks you to change them.

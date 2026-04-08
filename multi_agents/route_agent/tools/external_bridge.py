@@ -270,6 +270,7 @@ class ExternalRouteAgentBridge(LiveProbeMixin):
             selected_model=selected_model,
             selected_provider=selected_provider,
             selected_model_id=selected_model_id,
+            candidates=candidates,
             route_latency_ms=route_latency_ms,
             trace_context=trace_context,
             routing_reason=str(getattr(filtered_decision, "reason", "") or ""),

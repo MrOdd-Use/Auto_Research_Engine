@@ -61,8 +61,7 @@ def parse_dimension(value: str) -> int:
         value = value[:-2]  # Remove 'px' suffix
     try:
         return int(value)  # Convert to float first to handle decimal values
-    except ValueError as e:
-        print(f"Error parsing dimension value {value}: {e}")
+    except ValueError:
         return None
 
 def extract_title(soup: BeautifulSoup) -> str:

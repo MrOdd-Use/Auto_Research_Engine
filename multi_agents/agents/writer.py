@@ -64,7 +64,7 @@ class WriterAgent:
                 "Only use source IDs that appear in the research data. "
                 "Do not invent facts not present in the research data.\n"
                 "If information for a topic is unavailable in the sources, "
-                "write: [该方面的知识无从得知]\n\n"
+                "write: [Knowledge on this topic unavailable from known sources]\n\n"
             )
 
         prompt = [

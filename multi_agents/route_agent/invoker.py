@@ -11,6 +11,11 @@ def _is_quota_error(exc: BaseException) -> bool:
     msg = str(exc).upper()
     return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg or "RATE_LIMIT" in msg
 
+
+def _is_soft_error(exc: BaseException) -> bool:
+    msg = str(exc)
+    return "503" in msg or "service_busy" in msg.lower() or "service unavailable" in msg.lower()
+
 from .client import RouteAgentClient
 from .utils.context import current_route_scope
 from .utils.model_utils import build_model_identifier
@@ -86,21 +91,6 @@ class RoutedLLMInvoker:
             }
         )
         started_at = time.perf_counter()
-        self._emit(
-            {
-                "type": "execution_start",
-                "backend": self.client.backend,
-                "application_name": request.application_name,
-                "shared_agent_class": decision.resolved_shared_agent_class,
-                "agent_role": request.agent_role,
-                "stage_name": request.stage_name,
-                "selected_model": decision.selected_model,
-                "selected_provider": decision.selected_provider,
-                "selected_model_id": selected_model_id,
-                "route_latency_ms": decision.route_latency_ms,
-                "trace_context": decision.trace_context,
-            }
-        )
         execution_id = self.client.start_execution_tracking(request, decision)
         executed_model = decision.selected_model
         executed_provider = decision.selected_provider
@@ -207,10 +197,11 @@ class RoutedLLMInvoker:
             for item in results
             if not item.get("ok") and not item.get("skipped")
         ]
+        backend = str(getattr(self.client, "backend", "") or "external")
         self._emit(
             {
                 "type": "startup_preflight",
-                "backend": "external",
+                "backend": backend,
                 "checked_models": len(results),
                 "ok_count": ok_count,
                 "skipped_count": skipped_count,
@@ -219,7 +210,7 @@ class RoutedLLMInvoker:
         )
         self._startup_preflight_done = True
         if results and ok_count == 0 and skipped_count == 0:
-            raise RuntimeError("external Route_Agent preflight found no reachable models")
+            raise RuntimeError("Route_Agent startup preflight found no reachable models")
 
     async def _invoke_external_runtime(
         self,
@@ -564,12 +555,24 @@ class RoutedLLMInvoker:
 
     async def _invoke_provider(self, *, provider_call: ProviderCall, decision: RouteDecision) -> Any:
         candidates = list(decision.candidates or [])
-        # 把当前选中的模型放在首位，其余候选跟在后面
-        current = {"model": decision.selected_model, "provider": decision.selected_provider}
-        ordered = [current] + [c for c in candidates if c.get("model") != decision.selected_model]
+        current_model_id = build_model_identifier(decision.selected_provider, decision.selected_model)
+
+        # 以 model_id 去重，selected 模型排首位
+        seen: set[str] = {current_model_id}
+        ordered: list[dict[str, Any]] = [
+            {"model": decision.selected_model, "provider": decision.selected_provider}
+        ]
+        for c in candidates:
+            mid = build_model_identifier(
+                str(c.get("provider") or ""),
+                str(c.get("model") or ""),
+            )
+            if mid not in seen:
+                seen.add(mid)
+                ordered.append(dict(c))
 
         last_exc: Exception | None = None
-        for candidate in ordered:
+        for idx, candidate in enumerate(ordered):
             model = candidate.get("model") or decision.selected_model
             provider = candidate.get("provider") or decision.selected_provider
             try:
@@ -577,20 +580,29 @@ class RoutedLLMInvoker:
                     return await provider_call(model, provider)
                 return await provider_call(model)
             except Exception as exc:
-                if not _is_quota_error(exc) or candidate is ordered[-1]:
+                is_last = idx == len(ordered) - 1
+                is_quota = _is_quota_error(exc)
+                is_hard = self._is_hard_unavailable_error(exc)
+                is_soft = _is_soft_error(exc)
+
+                if is_last or (not is_quota and not is_hard and not is_soft):
                     raise
-                # quota 耗尽：标记失败，尝试下一个候选
+
+                # quota / hard-unavailable（400）/ soft（503）→ fallback 到下一候选
                 self.client.record_execution_failure(
                     "",
                     decision.resolved_shared_agent_class,
                     model,
                     provider_failure=True,
                 )
+                next_candidate = ordered[idx + 1]
+                event_type = "quota_fallback" if is_quota else "execution_fallback"
                 self._emit({
-                    "type": "quota_fallback",
+                    "type": event_type,
                     "failed_model": model,
                     "failed_provider": provider,
-                    "next_model": ordered[ordered.index(candidate) + 1].get("model"),
+                    "next_model": next_candidate.get("model"),
+                    "next_provider": next_candidate.get("provider"),
                     "error": str(exc)[:200],
                 })
                 last_exc = exc

@@ -92,7 +92,6 @@ async def test_invoker_records_route_then_execution_events():
     assert seen["model"] in {"gpt-4o-mini", "gpt-4o"}
     assert [event["type"] for event in events] == [
         "route_decision",
-        "execution_start",
         "execution_end",
     ]
     assert events[0]["route_latency_ms"] >= 0.0
@@ -251,11 +250,11 @@ async def test_external_invoker_escalates_after_runtime_failure():
     assert [event["type"] for event in events] == [
         "startup_preflight",
         "route_decision",
-        "execution_start",
         "execution_escalation",
         "execution_end",
     ]
-    assert events[3]["kind"] == "escalate"
+    assert events[0]["backend"] == "local_study"
+    assert events[2]["kind"] == "escalate"
     assert events[-1]["status"] == "completed"
     assert events[-1]["selected_model"] == "good-model"
     assert client.ended[-1]["status"] == "completed"
@@ -300,4 +299,5 @@ async def test_external_invoker_aborts_when_startup_preflight_finds_no_reachable
         )
 
     assert [event["type"] for event in events] == ["startup_preflight"]
+    assert events[0]["backend"] == "local_study"
     assert events[0]["ok_count"] == 0
