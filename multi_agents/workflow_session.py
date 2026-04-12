@@ -9,7 +9,7 @@ from backend.server.workflow_store import WorkflowStore, make_json_safe
 def _section_slug(section_index: int, section_title: str) -> str:
     safe = "".join(char.lower() if char.isalnum() else "_" for char in str(section_title or "section"))
     safe = "_".join(part for part in safe.split("_") if part)
-    return f"section_{section_index}_{safe[:48] or 'section'}"
+    return f"section_{section_index + 1}_{safe[:48] or 'section'}"
 
 
 class WorkflowSessionRecorder:

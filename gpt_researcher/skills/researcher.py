@@ -59,7 +59,13 @@ class ResearchConductor:
             self.researcher.websocket,
         )
 
-        search_results = await get_search_results(query, self.researcher.retrievers[0], query_domains, researcher=self.researcher)
+        search_results = await get_search_results(
+            query,
+            self.researcher.retrievers[0],
+            query_domains,
+            researcher=self.researcher,
+            fallback_retrievers=self.researcher.retrievers[1:],
+        )
         self.logger.info(f"Initial search results obtained: {len(search_results)} results")
 
         await stream_output(

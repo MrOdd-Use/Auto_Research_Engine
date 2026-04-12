@@ -126,6 +126,7 @@ class NoDriverScraper:
                 NoDriverScraper.logger.warning(
                     f"Rate limiting error for {url}: {str(e)}"
                 )
+                yield
 
         async def stop(self):
             if self.stopping:
@@ -206,6 +207,8 @@ class NoDriverScraper:
                 return str(e), [], ""
 
             page = await browser.get(self.url)
+            if page is None:
+                return "Failed to open page", [], ""
             await browser.wait_or_timeout(page, "complete", 2)
             # wait for potential redirection
             await page.sleep(random.uniform(0.3, 0.7))

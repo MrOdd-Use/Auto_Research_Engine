@@ -8,10 +8,10 @@ from gpt_researcher.context.compression import truncate_research_data
 
 sample_json = """
 {
-  "introduction": An in-depth introduction in markdown syntax. Cite every factual claim immediately after the sentence using numeric source IDs, e.g. 'Jobs displaced by 2030[S1][S2].',
-  "conclusion": A conclusion in markdown syntax. Cite every factual claim using numeric source IDs, e.g. 'Productivity gains reached 40%[S3].',
+  "introduction": An in-depth introduction in markdown syntax. Cite every factual claim immediately after the sentence using [chapter.index] source IDs, e.g. 'Jobs displaced by 2030[1.1][1.2].',
+  "conclusion": A conclusion in markdown syntax. Cite every factual claim using [chapter.index] source IDs, e.g. 'Productivity gains reached 40%[2.3].',
   "sources": A list with strings of all used source links in APA citation format with markdown hyperlinks. For example: ['-  Title, year, Author [source url](source)', ...],
-  "claim_annotations": A list of objects for each factual claim: [{"sentence": "the factual claim sentence", "source_ids": ["S1", "S2"], "section": "introduction"}, ...]
+  "claim_annotations": A list of objects for each factual claim: [{"sentence": "the factual claim sentence", "source_ids": ["1.1", "1.2"], "section": "introduction"}, ...]
 }
 """
 
@@ -183,9 +183,9 @@ class WriterAgent:
         citation_instruction = ""
         if has_source_index:
             citation_instruction = (
-                "IMPORTANT: The research data below includes source IDs like [S1], [S2], etc.\n"
+                "IMPORTANT: The research data below includes source IDs like [1.1], [1.2], etc.\n"
                 "You MUST cite these source IDs after every factual claim. "
-                "For example: 'Revenue reached $128B [S1][S2].'\n"
+                "For example: 'Revenue reached $128B [1.1][1.2].'\n"
                 "Only use source IDs that appear in the research data. "
                 "Do not invent facts not present in the research data.\n"
                 "If information for a topic is unavailable in the sources, "
@@ -208,7 +208,7 @@ class WriterAgent:
                 f"Your task is to write an in depth, well written and detailed "
                 f"introduction and conclusion to the research report based on the provided research data. "
                 f"Do not include headers in the results.\n"
-                f"Cite all sources using numeric IDs placed directly after each claim, e.g. 'Jobs displaced by 2030[S1][S3].'\n"
+                f"Cite all sources using [chapter.index] IDs placed directly after each claim, e.g. 'Jobs displaced by 2030[1.1][2.3].'\n"
                 f"Do NOT use inline markdown hyperlinks. All URLs belong in the 'sources' list only.\n\n"
                 f"{note_block}"
                 f"{guidelines_block}\n"

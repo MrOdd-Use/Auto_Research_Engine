@@ -37,7 +37,6 @@ from .utils.output_writers import (
     write_model_decisions,
     write_writer_draft_snapshot,
     write_section_draft_files,
-    _build_chapter_citation_map,
     _extract_section_body_text,
 )
 
@@ -682,7 +681,7 @@ class ChiefEditorAgent:
     @staticmethod
     def _fallback_section_key(section_index: int, header: str) -> str:
         cleaned = re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().lower()).strip("_")
-        return f"section_{section_index}_{cleaned[:48] or 'section'}"
+        return f"section_{section_index + 1}_{cleaned[:48] or 'section'}"
 
     def _build_section_contexts(
         self,
@@ -736,16 +735,6 @@ class ChiefEditorAgent:
             state[key] = merged
 
     @staticmethod
-    def _next_source_id(source_index: Dict[str, Any]) -> int:
-        max_id = 0
-        for key in (source_index or {}).keys():
-            try:
-                max_id = max(max_id, int(str(key).lstrip("S")))
-            except ValueError:
-                continue
-        return max_id + 1
-
-    @staticmethod
     def _build_writer_reflexion_note(suspicious_claims: List[dict]) -> str:
         lines = [
             "Refresh the introduction and conclusion using the updated evidence index.",
@@ -780,7 +769,7 @@ class ChiefEditorAgent:
         return state
 
     async def _remap_section_drafts_to_global_index(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Remap per-section local [S1]..[Sn] citations to global source_index IDs.
+        """Remap per-section local [S1]..[Sn] citations to global [chapter.index] IDs.
 
         SectionSynthesizerAgent assigns local S1..Sn within each section. After the
         global source_index is built by ClaimVerifierAgent, this method matches each
@@ -838,10 +827,7 @@ class ChiefEditorAgent:
         section_details = state.get("section_details") or []
         section_summaries = state.get("section_summaries") or []
         for i, section_ev in enumerate(remapped_ev):
-            if not isinstance(section_ev, list):
-                continue
-            citation_map = _build_chapter_citation_map(i + 1, section_ev)
-            if not citation_map:
+            if not isinstance(section_ev, list) or not section_ev:
                 continue
             detail = section_details[i] if i < len(section_details) else {}
             section_title = str(detail.get("header") or f"Section {i + 1}").strip()
@@ -853,13 +839,12 @@ class ChiefEditorAgent:
             summary = section_summaries[i] if i < len(section_summaries) else ""
             await write_section_draft_files(
                 output_dir=self.output_dir,
-                chapter_num=i + 1,
+                chapter_num=self._infer_chapter_num(section_ev, i),
                 section_key=section_key,
                 section_title=section_title,
                 section_body=section_body,
                 summary=summary,
                 section_evidence=section_ev,
-                citation_map=citation_map,
                 incremental_evidence=False,
             )
 
@@ -867,11 +852,29 @@ class ChiefEditorAgent:
 
     @staticmethod
     def _replace_citation_ids(text: str, id_map: Dict[str, str]) -> str:
-        """Replace [S1]..[Sn] local citation markers with global IDs."""
+        """Replace local [S1]..[Sn] citation markers with global [chapter.index] IDs."""
         def replacer(match: re.Match) -> str:
             local_id = f"S{match.group(1)}"
             return f"[{id_map.get(local_id, local_id)}]"
         return re.sub(r"\[S(\d+)\]", replacer, text)
+
+    @staticmethod
+    def _infer_chapter_num(section_ev: list, fallback_index: int) -> int:
+        """从 section_ev 的 global_id 推断正确的章节号。
+
+        remap 后每条 entry 的 global_id 格式为 "chapter.index"（如 "1.5"），
+        取点号前的整数即为真实章节号，避免用列表下标 i+1 产生偏移。
+        """
+        for entry in section_ev:
+            if not isinstance(entry, dict):
+                continue
+            gid = str(entry.get("global_id") or "")
+            if "." in gid:
+                try:
+                    return int(gid.split(".")[0])
+                except ValueError:
+                    pass
+        return fallback_index + 1
 
     async def _run_claim_review(
         self,
@@ -945,7 +948,6 @@ class ChiefEditorAgent:
 
             new_index, _ = verifier.build_source_index(
                 selected_packets,
-                start_id=self._next_source_id(existing_index),
                 section_contexts=selected_contexts,
                 existing_index=existing_index,
             )

@@ -1,9 +1,10 @@
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, List
 
 from .state_controller import StateController
+from .utils.llms import call_model
 from .utils.views import print_agent_output
 
 
@@ -19,24 +20,14 @@ class CheckDataAgent:
     PASS_THRESHOLD = 0.7
     COVERAGE_THRESHOLD = 0.7
     DEFAULT_RETRY_BUDGET = 1
+    MAX_PASSAGES_CHARS = 1500
     SUSPICIOUS_TOKENS = {
-        "projection",
-        "projected",
-        "forecast",
-        "estimated",
-        "预计",
-        "预测",
-        "预估",
+        "projection", "projected", "forecast", "estimated",
+        "预计", "预测", "预估",
     }
     ACTUAL_TOKENS = {
-        "actual",
-        "audited",
-        "reported",
-        "official filing",
-        "actuals",
-        "审计",
-        "实绩",
-        "财报",
+        "actual", "audited", "reported", "official filing", "actuals",
+        "审计", "实绩", "财报",
     }
 
     def __init__(self, websocket=None, stream_output=None, headers=None):
@@ -52,11 +43,6 @@ class CheckDataAgent:
         topic = str(draft_state.get("topic") or "").strip() or "Main Research Focus"
         research_context = draft_state.get("research_context") or {}
         scraping_packet = draft_state.get("scraping_packet") or {}
-        checkpoint_note = (
-            str(task.get("checkpoint_note") or "").strip()
-            if task.get("checkpoint_target") == "check_data"
-            else ""
-        )
         iteration_index = self._normalize_iteration(draft_state.get("iteration_index"))
         max_retries = self._normalize_max_retries(task.get("check_data_max_retries"))
         coverage_report = self._build_coverage_report(scraping_packet, research_context)
@@ -71,12 +57,11 @@ class CheckDataAgent:
         self.state_controller.set_tier("check_data", tier_idx)
 
         try:
-            segments = self._extract_segments(scraping_packet)
-            claims = self._atomic_deconstruct(topic, research_context, checkpoint_note=checkpoint_note)
-            precheck = self._constraint_guard(claims, segments)
-            deep_eval_report = self._run_deep_eval(claims, segments, precheck, coverage_report)
+            target_entries = self._extract_target_entries(scraping_packet)
+            precheck = self._constraint_guard(target_entries)
+            llm_eval_report = await self._llm_eval_targets(topic, target_entries, precheck)
 
-            final_score = float(deep_eval_report.get("final_score") or 0.0)
+            final_score = float(llm_eval_report.get("final_score") or 0.0)
             hard_fail = bool(precheck.get("hard_fail"))
             status = self._resolve_status(
                 final_score=final_score,
@@ -87,16 +72,14 @@ class CheckDataAgent:
             )
             feedback_packet = self._build_feedback_packet(
                 topic,
-                claims,
                 precheck,
-                deep_eval_report,
+                llm_eval_report,
                 coverage_report,
             )
             verdict = {
                 "status": status,
-                "deep_eval_report": deep_eval_report,
+                "llm_eval_report": llm_eval_report,
                 "feedback_packet": feedback_packet,
-                "atomic_claims": claims,
                 "guard_report": precheck,
                 "coverage_report": coverage_report,
             }
@@ -140,7 +123,12 @@ class CheckDataAgent:
                     "extra_hints": retry_hints,
                 }
 
-            placeholder = self._blocked_placeholder(topic, deep_eval_report, feedback_packet)
+            placeholder = self._blocked_placeholder(
+                topic,
+                llm_eval_report,
+                feedback_packet,
+                max_retries=max_retries,
+            )
             await self._emit_log(
                 "check_data_blocked",
                 f"Check Data blocked topic '{topic}' after {iteration_index} attempts (score {final_score:.2f}).",
@@ -181,169 +169,135 @@ class CheckDataAgent:
             parsed = self.DEFAULT_RETRY_BUDGET + 1
         return min(max(parsed, 1), self.MAX_RETRIES)
 
-    def _extract_segments(self, scraping_packet: dict) -> List[str]:
-        segments: List[str] = []
+    def _extract_target_entries(self, scraping_packet: dict) -> List[dict]:
+        """Extract (target, passages_text) pairs from search_log."""
+        entries = []
         for item in scraping_packet.get("search_log", []):
             if not isinstance(item, dict):
                 continue
+            target = str(item.get("target") or "").strip()
+            if not target:
+                continue
+            passages_parts = []
             for passage in item.get("top_10_passages", []):
                 if not isinstance(passage, dict):
                     continue
                 content = str(passage.get("content") or "").strip()
                 if content:
-                    segments.append(content)
-        return segments
+                    passages_parts.append(content)
+            passages_text = " ".join(passages_parts)[: self.MAX_PASSAGES_CHARS]
+            entries.append({"target": target, "passages_text": passages_text})
+        return entries
 
-    def _atomic_deconstruct(self, topic: str, research_context: dict, checkpoint_note: str = "") -> dict:
-        subject = self._extract_subject(topic, research_context, checkpoint_note)
-        time_constraint = self._extract_time_constraint(topic)
-        metric = self._extract_metric(topic, research_context, checkpoint_note)
-        negative_constraints = self._extract_negative_constraints(topic)
-        return {
-            "subject": subject,
-            "time_constraint": time_constraint,
-            "metric": metric,
-            "negative_constraints": negative_constraints,
-        }
+    def _constraint_guard(self, target_entries: List[dict]) -> dict:
+        """Pre-screen for empty passages and suspicious forecast language."""
+        all_passages = " ".join(e["passages_text"] for e in target_entries).lower()
+        empty_targets = [e["target"] for e in target_entries if not e["passages_text"].strip()]
 
-    def _extract_subject(self, topic: str, research_context: dict, checkpoint_note: str = "") -> str:
-        key_points = research_context.get("key_points") or []
-        candidates: List[str] = []
-        for point in key_points:
-            text = str(point or "").strip()
-            if text:
-                candidates.append(text)
-        candidates.append(topic)
-        if checkpoint_note:
-            candidates.append(checkpoint_note)
-
-        for text in candidates:
-            match = re.search(r"\b([A-Z][A-Za-z0-9&\-.]{1,})\b", text)
-            if match:
-                return match.group(1)
-
-        lowered = topic.lower()
-        for marker in ("company", "firm", "vendor", "manufacturer"):
-            idx = lowered.find(marker)
-            if idx > 0:
-                return topic[:idx].strip()
-        return ""
-
-    def _extract_time_constraint(self, topic: str) -> str:
-        q_match = re.search(r"(20\d{2}\s*[-/]?\s*Q[1-4])", topic, flags=re.IGNORECASE)
-        if q_match:
-            return re.sub(r"\s+", "", q_match.group(1).upper())
-        y_match = re.search(r"(20\d{2})", topic)
-        if y_match:
-            return y_match.group(1)
-        return ""
-
-    def _extract_metric(self, topic: str, research_context: dict, checkpoint_note: str = "") -> str:
-        description = str(research_context.get("description") or "")
-        key_points = " ".join(str(x or "") for x in (research_context.get("key_points") or []))
-        source_text = f"{topic} {description} {key_points} {checkpoint_note}".lower()
-        metric_candidates = [
-            "revenue",
-            "profit",
-            "margin",
-            "shipment",
-            "market share",
-            "guidance",
-            "growth",
-            "valuation",
-            "营收",
-            "利润",
-            "增速",
-            "份额",
-        ]
-        for metric in metric_candidates:
-            if metric in source_text:
-                return metric
-        return ""
-
-    def _extract_negative_constraints(self, topic: str) -> List[str]:
-        negatives = ["projection", "forecast"]
-        # Exclude years that are near-past but not the target year
-        year_match = re.search(r"20\d{2}", topic)
-        if year_match:
-            target_year = int(year_match.group())
-            for candidate in (target_year - 1, target_year - 2):
-                if str(candidate) not in topic:
-                    negatives.append(str(candidate))
-        return negatives
-
-    def _constraint_guard(self, claims: dict, segments: List[str]) -> dict:
-        corpus = " ".join(segments).lower()
-        subject = str(claims.get("subject") or "").lower()
-        time_constraint = str(claims.get("time_constraint") or "").lower()
-
-        subject_present = bool(subject) and self._contains_term(corpus, subject)
-        time_present = bool(time_constraint) and self._contains_term(corpus, time_constraint)
-
-        hard_fail_reasons = []
-        if subject and not subject_present:
-            hard_fail_reasons.append("missing_subject")
-        if time_constraint and not time_present:
-            hard_fail_reasons.append("missing_time_constraint")
-
-        suspicious_hit = any(token in corpus for token in self.SUSPICIOUS_TOKENS)
-        actual_hit = any(token in corpus for token in self.ACTUAL_TOKENS)
+        suspicious_hit = any(token in all_passages for token in self.SUSPICIOUS_TOKENS)
+        actual_hit = any(token in all_passages for token in self.ACTUAL_TOKENS)
         suspicious = suspicious_hit and not actual_hit
 
-        density = self._entity_density(corpus, subject)
+        hard_fail_reasons = []
+        if empty_targets:
+            hard_fail_reasons.append("empty_passages")
+        if not target_entries:
+            hard_fail_reasons.append("no_targets")
+
         return {
             "hard_fail": bool(hard_fail_reasons),
             "hard_fail_reasons": hard_fail_reasons,
-            "subject_present": subject_present,
-            "time_present": time_present,
-            "entity_density": density,
+            "empty_targets": empty_targets,
             "suspicious": suspicious,
             "suspicious_reason": "projection_or_forecast_without_actual" if suspicious else "",
         }
 
-    def _run_deep_eval(self, claims: dict, segments: List[str], precheck: dict, coverage_report: dict = None) -> dict:
-        required_claims = [x for x in [claims.get("subject"), claims.get("time_constraint"), claims.get("metric")] if x]
-        corpus = " ".join(segments).lower()
-        verified_claims = 0
-        failed_claims: List[str] = []
+    async def _llm_eval_targets(self, topic: str, target_entries: List[dict], precheck: dict) -> dict:
+        """Batch LLM evaluation: judge whether each target is answered by its passages."""
+        if not target_entries:
+            return {
+                "final_score": 0.0,
+                "checked_count": 0,
+                "total_targets": 0,
+                "target_results": [],
+                "failed_targets": [],
+            }
 
-        for claim in required_claims:
-            normalized = str(claim).lower()
-            if self._contains_term(corpus, normalized):
-                verified_claims += 1
-            else:
-                failed_claims.append(f"Claim not verified: {claim}")
+        if precheck.get("hard_fail") and "empty_passages" in precheck.get("hard_fail_reasons", []):
+            results = [
+                {"target": e["target"], "checked": False, "reason": "no passages retrieved"}
+                for e in target_entries
+            ]
+            return self._build_llm_eval_report(results, short_circuit=True)
 
-        total_required = len(required_claims)
-        if total_required == 0:
-            # No structural claims extracted (e.g. pure Chinese topic with no year/metric).
-            # Fall back to section_coverage so the agent doesn't hard-penalize valid content.
-            section_cov = float((coverage_report or {}).get("section_coverage") or 0.0)
-            final_score = round(section_cov, 4)
-            if final_score == 0.0:
-                failed_claims.append("No required claims extracted and coverage is zero.")
-            else:
-                failed_claims.append("No required claims extracted; score derived from section coverage.")
-        else:
-            final_score = verified_claims / total_required
+        blocks = []
+        for i, entry in enumerate(target_entries, start=1):
+            evidence = entry["passages_text"] if entry["passages_text"].strip() else "(no evidence retrieved)"
+            blocks.append(
+                f"## Target {i}\n"
+                f"Search goal: {entry['target']}\n"
+                f"Evidence:\n{evidence}"
+            )
 
-        if precheck.get("hard_fail"):
-            final_score = min(final_score, 0.69)
-            failed_claims.extend(precheck.get("hard_fail_reasons") or [])
+        targets_section = "\n\n".join(blocks)
+        prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research quality evaluator. "
+                    "For each search target below, judge whether the provided evidence directly and specifically answers the search goal. "
+                    "'checked' is true only if the evidence contains a concrete, on-topic answer — not a vague mention or tangential reference. "
+                    "Return a JSON array only, no extra text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{targets_section}\n\n"
+                    "---\n"
+                    "Return a JSON array with one object per target:\n"
+                    '[{"target": "...", "checked": true/false, "reason": "one sentence"}, ...]'
+                ),
+            },
+        ]
 
-        if precheck.get("suspicious"):
-            final_score = min(final_score, 0.69)
-            failed_claims.append("Suspicious forecast/projection wording without actual or audited evidence.")
+        try:
+            raw = await call_model(
+                prompt=prompt,
+                model="",
+                response_format="json",
+                route_context={
+                    "shared_agent_class": "check_data_agent",
+                    "agent_role": "check_data",
+                    "stage_name": "check_data",
+                    "task": (
+                        "Task: Evaluate whether each target below is directly answered by "
+                        f"the provided evidence for the section topic '{topic}'."
+                    ),
+                },
+            )
+            results = raw if isinstance(raw, list) else []
+        except Exception as exc:
+            self.logger.warning("LLM eval failed, falling back to unchecked: %s", exc)
+            results = [
+                {"target": e["target"], "checked": False, "reason": f"llm_error: {exc}"}
+                for e in target_entries
+            ]
 
-        final_score = max(0.0, min(1.0, round(final_score, 4)))
-        verdict = "Pass" if final_score >= self.PASS_THRESHOLD and not precheck.get("hard_fail") else "Partial Match"
+        return self._build_llm_eval_report(results)
 
+    def _build_llm_eval_report(self, results: list, short_circuit: bool = False) -> dict:
+        checked_count = sum(1 for r in results if r.get("checked"))
+        total = len(results)
+        final_score = round(checked_count / total, 4) if total else 0.0
+        failed_targets = [r for r in results if not r.get("checked")]
         return {
             "final_score": final_score,
-            "verified_claims": verified_claims,
-            "total_required_claims": total_required,
-            "failed_claims": failed_claims,
-            "verdict": verdict,
+            "checked_count": checked_count,
+            "total_targets": total,
+            "target_results": results,
+            "failed_targets": failed_targets,
+            "short_circuit": short_circuit,
         }
 
     def _resolve_status(
@@ -367,18 +321,16 @@ class CheckDataAgent:
     def _build_feedback_packet(
         self,
         topic: str,
-        claims: dict,
         precheck: dict,
-        deep_eval_report: dict,
+        llm_eval_report: dict,
         coverage_report: dict,
     ) -> dict:
-        failed_claims = deep_eval_report.get("failed_claims") or []
         missing_clauses = []
 
-        if "missing_time_constraint" in (precheck.get("hard_fail_reasons") or []):
-            missing_clauses.append("enforce the exact target year/quarter and exclude old years")
-        if "missing_subject" in (precheck.get("hard_fail_reasons") or []):
-            missing_clauses.append("focus strictly on the target entity")
+        if "empty_passages" in (precheck.get("hard_fail_reasons") or []):
+            missing_clauses.append("some search targets returned no evidence at all")
+        if "no_targets" in (precheck.get("hard_fail_reasons") or []):
+            missing_clauses.append("no search targets were found in the scraping packet")
         if precheck.get("suspicious"):
             missing_clauses.append("exclude projection/forecast language and require actual or audited values")
         if float(coverage_report.get("section_coverage") or 0.0) < self.COVERAGE_THRESHOLD:
@@ -386,34 +338,30 @@ class CheckDataAgent:
                 f"increase section evidence coverage to at least {self.COVERAGE_THRESHOLD:.2f}"
             )
 
-        subject = str(claims.get("subject") or "").strip()
-        time_constraint = str(claims.get("time_constraint") or "").strip()
-        metric = str(claims.get("metric") or "").strip()
+        failed_targets = llm_eval_report.get("failed_targets") or []
+        failed_target_texts = [str(r.get("target") or "") for r in failed_targets if r.get("target")]
 
-        query_parts = [x for x in [subject, time_constraint, metric, "actual", "audited"] if x]
-        query = " ".join(query_parts).strip()
-        if "2026" in time_constraint:
-            query = f'{query} -"2024" -"2025"'
+        query_parts = failed_target_texts[:3]
         if precheck.get("suspicious"):
-            query = f"{query} -projection -forecast"
+            query_parts.append("-projection -forecast")
+        query = " ".join(query_parts).strip() or f"{topic} actual audited report"
         query = re.sub(r"\s+", " ", query).strip()
-
-        if not query:
-            query = f"{topic} actual audited report"
-
-        if not missing_clauses and failed_claims:
-            missing_clauses.append("address missing claims from the previous round")
-        if not missing_clauses:
-            missing_clauses.append("improve relevance and evidence quality")
 
         uncovered_queries = coverage_report.get("uncovered_queries") or []
         if uncovered_queries:
             query = f"{query} {' '.join(uncovered_queries[:2])}".strip()
 
+        if not missing_clauses and failed_targets:
+            missing_clauses.append(
+                f"re-search the following unanswered targets: {', '.join(failed_target_texts[:3])}"
+            )
+        if not missing_clauses:
+            missing_clauses.append("improve relevance and evidence quality")
+
         return {
             "instruction": "Previous results are insufficient: " + "; ".join(missing_clauses) + ".",
             "new_query_suggestion": query,
-            "failed_claims": failed_claims,
+            "failed_targets": failed_targets,
             "uncovered_queries": uncovered_queries,
         }
 
@@ -430,14 +378,20 @@ class CheckDataAgent:
             parts.append(f"Prioritize unresolved queries: {', '.join(uncovered_queries[:3])}")
         return " ; ".join(parts)
 
-    def _blocked_placeholder(self, topic: str, deep_eval_report: dict, feedback_packet: dict) -> str:
-        score = deep_eval_report.get("final_score")
+    def _blocked_placeholder(
+        self,
+        topic: str,
+        llm_eval_report: dict,
+        feedback_packet: dict,
+        max_retries: int,
+    ) -> str:
+        score = llm_eval_report.get("final_score")
         suggestion = feedback_packet.get("new_query_suggestion")
         return (
             f"### {topic}\n\n"
-            f"Insufficient evidence for this section, requires manual review (final_score={score}).\n"
-            "System failed to meet the minimum confidence threshold (0.7) after 3 verification rounds.\n"
-            f"Suggested additional search: {suggestion}\n"
+            f"证据不足，需人工复核（final_score={score}）。\n"
+            f"系统在 {max_retries} 轮验证后未能达到最低置信阈值（0.7）。\n"
+            f"建议补充搜索：{suggestion}\n"
         ).strip()
 
     async def _emit_log(self, event: str, message: str) -> None:

@@ -218,6 +218,7 @@ dependencies = [
     "zstandard>=0.23.0",
     "route-agent",
     "zendriver>=0.15.3",
+    "ddgs>=9.13.0",
 ]
 
 [project.optional-dependencies]

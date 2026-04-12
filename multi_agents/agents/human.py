@@ -348,5 +348,9 @@ class HumanAgent:
             if description:
                 lines.append(f"   {description}")
             for kp in section.get("key_points", []):
-                lines.append(f"   - {kp}")
+                if isinstance(kp, dict):
+                    point_text = kp.get("point") or kp.get("text") or str(kp)
+                else:
+                    point_text = str(kp)
+                lines.append(f"   - {point_text}")
         return "\n".join(lines)

@@ -48,7 +48,7 @@ _PLANNING_SYSTEM_PROMPT = (
 class EditorAgent:
     """Agent responsible for planning research outlines and managing parallel research."""
 
-    _DEFAULT_MAX_SECTIONS = 3
+    _DEFAULT_MAX_SECTIONS = 6
     _FORBIDDEN_SECTION_TITLES = {
         "introduction",
         "conclusion",
@@ -155,9 +155,9 @@ class EditorAgent:
             if not queries:
                 queries = [self._fallback_section_title(task)]
             section_details = [
-                {"header": q, "description": "", "key_points": [], "research_queries": []}
+                {"header": q, "description": "", "key_points": []}
                 for q in queries
-        ]
+            ]
 
         self._log_parallel_research([s["header"] for s in section_details])
 
@@ -302,8 +302,7 @@ important angles).
 **Step 3 - Structure Sections**: For each sub-aspect, create a section with:
 - A clear, specific header (not generic like "Overview" or "Background")
 - A one-sentence description of its scope and boundaries
-- 2-3 key points that a researcher should investigate
-- 2-3 targeted search queries a researcher should use to find relevant information
+- 2-4 key points that a researcher should investigate, each with 1-2 concrete search queries scoped tightly to that point
 
 **Step 4 - Verify**: Ensure sections don't overlap, follow a logical order, and \
 together fully address the original query.
@@ -320,8 +319,10 @@ Return valid JSON only (no markdown fences) with this exact shape:
     {{
       "header": "Specific Section Title",
       "description": "One sentence describing what this section covers and its boundaries",
-      "key_points": ["Point to investigate 1", "Point to investigate 2"],
-      "research_queries": ["targeted search query 1", "targeted search query 2"]
+      "key_points": [
+        {{"point": "What to investigate 1", "search_queries": ["concrete search target 1a", "concrete search target 1b"]}},
+        {{"point": "What to investigate 2", "search_queries": ["concrete search target 2a"]}}
+      ]
     }}
   ]
 }}"""
@@ -335,6 +336,8 @@ Return valid JSON only (no markdown fences) with this exact shape:
         Attempts Pydantic validation first, then falls back to flat-string parsing
         for backward compatibility with models that return the old format.
         """
+        if isinstance(plan, list):
+            plan = {"sections": plan}
         try:
             outline = ResearchOutline(**plan)
             valid_sections = [
@@ -345,9 +348,9 @@ Return valid JSON only (no markdown fences) with this exact shape:
 
             if valid_sections:
                 return SimpleNamespace(
-                    title=outline.title or self._fallback_section_title(task),
+                    title=self._clean_text(outline.title) or self._fallback_section_title(task),
                     date=outline.date or datetime.now().strftime('%d/%m/%Y'),
-                    section_details=valid_sections,
+                    section_details=[self._fix_section_text(s) for s in valid_sections],
                 )
         except Exception as exc:
             import logging
@@ -360,7 +363,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
             title=self._normalize_title(plan.get("title"), task),
             date=self._normalize_date(plan.get("date")),
             section_details=[
-                {"header": h, "description": "", "key_points": [], "research_queries": []}
+                {"header": h, "description": "", "key_points": []}
                 for h in flat
             ],
         )
@@ -441,14 +444,46 @@ Return valid JSON only (no markdown fences) with this exact shape:
         audit_feedback: Optional[dict],
         extra_hints: Optional[str],
     ) -> Dict[str, Any]:
-        """Create the input for a single research task with enriched context."""
-        research_queries = self._normalize_research_queries(
-            section_detail.get("research_queries")
-        )
+        """Create the input for a single research task with enriched context.
+
+        key_points is now a list of {point, search_queries} dicts. This method
+        flattens the per-keypoint search_queries into a flat research_queries list
+        and extracts plain-text key_point labels for coverage evaluation.
+        Also handles legacy format where key_points are plain strings.
+        """
+        key_points_raw = section_detail.get("key_points") or []
+        key_point_texts: List[str] = []
+        research_queries: List[str] = []
+
+        for kp in key_points_raw:
+            if isinstance(kp, dict):
+                point_text = str(kp.get("point") or "").strip()
+                if point_text:
+                    key_point_texts.append(point_text)
+                for sq in (kp.get("search_queries") or []):
+                    cleaned = self._clean_text(sq)
+                    if cleaned:
+                        research_queries.append(cleaned)
+            else:
+                # legacy: plain string key_point, no associated queries
+                text = self._clean_text(kp)
+                if text:
+                    key_point_texts.append(text)
+
+        # deduplicate queries while preserving order
+        seen: set = set()
+        deduped_queries: List[str] = []
+        for q in research_queries:
+            key = q.lower()
+            if key not in seen:
+                seen.add(key)
+                deduped_queries.append(q)
+        research_queries = deduped_queries
+
         planning_incomplete = len(research_queries) == 0
         if planning_incomplete:
             logging.getLogger(__name__).warning(
-                "Planning incomplete for section '%s': missing research_queries.",
+                "Planning incomplete for section '%s': no search_queries found in key_points.",
                 section_detail.get("header"),
             )
         return {
@@ -461,7 +496,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
             ),
             "research_context": {
                 "description": section_detail.get("description", ""),
-                "key_points": section_detail.get("key_points", []),
+                "key_points": key_point_texts,
                 "research_queries": research_queries,
                 "planning_incomplete": planning_incomplete,
                 "planning_issue": "missing_research_queries" if planning_incomplete else "",
@@ -658,7 +693,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
 
     def _make_section_key(self, section_index: int, header: str) -> str:
         cleaned = re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().lower()).strip("_")
-        return f"section_{section_index}_{cleaned[:48] or 'section'}"
+        return f"section_{section_index + 1}_{cleaned[:48] or 'section'}"
 
     @staticmethod
     def _route_check_data(draft_state: Dict[str, Any]) -> str:
@@ -732,6 +767,22 @@ Return valid JSON only (no markdown fences) with this exact shape:
         if isinstance(sections, dict):
             yield from sections.values()
 
+    def _fix_section_text(self, section: dict) -> dict:
+        """Fix space-stripped strings in a section dict (header, description, key_points)."""
+        fixed = dict(section)
+        fixed["header"] = self._clean_text(section.get("header", ""))
+        fixed["description"] = self._clean_text(section.get("description", ""))
+        fixed["key_points"] = [
+            {
+                "point": self._clean_text(kp.get("point", "")),
+                "search_queries": [self._clean_text(q) for q in (kp.get("search_queries") or [])],
+            }
+            if isinstance(kp, dict)
+            else self._clean_text(kp)
+            for kp in (section.get("key_points") or [])
+        ]
+        return fixed
+
     def _clean_text(self, value: Any) -> str:
         """Normalize text output from model results."""
         if value is None:
@@ -741,21 +792,15 @@ Return valid JSON only (no markdown fences) with this exact shape:
 
         text = value.strip().strip("-*").strip()
         text = re.sub(r"\s+", " ", text)
+        # Fix space-stripped CamelCase strings caused by some models' JSON output bug.
+        # Strategy: insert space before each uppercase letter that follows a lowercase
+        # letter or digit (covers PascalCase word boundaries). Does not recover
+        # all-lowercase connector words like "and"/"on" that were merged without a
+        # case boundary — those require model-level fixes.
+        if len(text) > 15 and " " not in text and re.search(r"[a-z][A-Z]", text):
+            text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
+            # Also split runs like "AIJobs" -> "AI Jobs"
+            text = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
         return text
 
-    def _normalize_research_queries(self, research_queries: Any) -> List[str]:
-        """Normalize planner research queries for downstream deterministic use."""
-        if not isinstance(research_queries, list):
-            return []
-        normalized: List[str] = []
-        seen = set()
-        for item in research_queries:
-            cleaned = self._clean_text(item)
-            if not cleaned:
-                continue
-            key = cleaned.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(cleaned)
-        return normalized

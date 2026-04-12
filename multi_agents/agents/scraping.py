@@ -49,13 +49,13 @@ class ScrapingAgent:
         "ecommercefastlane.com",
     }
     DOMAIN_TO_ENGINES = {
-        "tech": ["arxiv", "semantic_scholar", "tavily"],
-        "medical": ["pubmed_central", "tavily"],
-        "finance": ["tavily"],
-        "general": ["tavily"],
+        "tech": ["arxiv", "semantic_scholar", "tavily", "duckduckgo"],
+        "medical": ["pubmed_central", "tavily", "duckduckgo"],
+        "finance": ["tavily", "duckduckgo"],
+        "general": ["tavily", "duckduckgo"],
     }
     VERTICAL_ENGINES = {"arxiv", "semantic_scholar", "pubmed_central"}
-    SEARCH_FALLBACK_ENGINES = ("tavily",)
+    SEARCH_FALLBACK_ENGINES = ("tavily", "duckduckgo")
     MODEL_LEVEL_FALLBACK = {
         1: "gpt-4o-mini",
         2: "gpt-4o",
@@ -92,6 +92,7 @@ class ScrapingAgent:
             self._max_search_targets = self._min_search_targets
 
     async def run_depth_scraping(self, draft_state: dict) -> dict:
+        """Run one or more scraping iterations and preserve prior evidence on retries."""
         task = draft_state.get("task") or {}
         topic = str(draft_state.get("topic") or "").strip()
         if not topic:
@@ -113,6 +114,12 @@ class ScrapingAgent:
             planned_iterations = min(self._resolve_iterations(audit_feedback), max_iterations)
             iteration_plan = list(range(1, planned_iterations + 1))
         packets: List[dict] = []
+        cumulative_packet = None
+        if use_single_iteration:
+            single_iteration = iteration_plan[0]
+            prior_packet = draft_state.get("scraping_packet") or {}
+            if single_iteration > 1 and self._packet_has_mergeable_results(prior_packet):
+                cumulative_packet = prior_packet
 
         if self.websocket and self.stream_output:
             await self.stream_output(
@@ -128,7 +135,6 @@ class ScrapingAgent:
             for iteration in iteration_plan:
                 tier_idx = self.ROUND_TO_TIER.get(iteration, 3)
                 self.state_controller.set_tier("scraping", tier_idx)
-                model_name = self._resolve_model_for_iteration(task, iteration)
                 extra_hints_applied = self._merge_extra_hints(extra_hints, audit_feedback)
                 source_queries = self._normalize_research_queries(
                     research_context.get("research_queries")
@@ -149,52 +155,26 @@ class ScrapingAgent:
                 fallback_used_any = False
 
                 for source_query in source_queries:
-                    candidates = await self._decompose_query_to_targets(
-                        source_query=source_query,
-                        research_context=research_context,
-                        extra_hints=extra_hints_applied,
-                        model_name=model_name,
-                        task_payload=task,
-                        draft_state=draft_state,
-                    )
-                    validation = self._validate_and_filter_targets(
-                        source_query=source_query,
-                        candidate_targets=candidates,
-                        research_context=research_context,
-                    )
-                    kept_targets = list(validation.get("kept") or [])
-                    discarded_targets = list(validation.get("discarded") or [])
+                    # source_queries are already concrete search targets produced by
+                    # the per-keypoint search_queries in the planner. Skip LLM
+                    # decomposition and use the query directly as the search target.
+                    kept_targets = [source_query]
                     fallback_used = False
 
-                    if not kept_targets:
-                        fallback_used = True
-                        fallback_used_any = True
-                        fallback_candidates = self._fallback_targets_from_context(
-                            source_query=source_query,
-                            research_context=research_context,
-                        )
-                        fallback_validation = self._validate_and_filter_targets(
-                            source_query=source_query,
-                            candidate_targets=fallback_candidates,
-                            research_context=research_context,
-                        )
-                        kept_targets = list(fallback_validation.get("kept") or [])
-                        discarded_targets.extend(fallback_validation.get("discarded") or [])
-
-                    unresolved = not bool(kept_targets)
+                    unresolved = False
                     query_target_map.append(
                         {
                             "source_query": source_query,
                             "planning_incomplete": planning_incomplete,
-                            "targets_generated": len(candidates),
-                            "targets_kept": len(kept_targets),
-                            "targets_discarded": len(discarded_targets),
-                            "candidate_targets": candidates,
+                            "targets_generated": 1,
+                            "targets_kept": 1,
+                            "targets_discarded": 0,
+                            "candidate_targets": [source_query],
                             "kept_targets": kept_targets,
-                            "discarded_targets": discarded_targets,
+                            "discarded_targets": [],
                             "fallback_used": fallback_used,
                             "unresolved": unresolved,
-                            "validation": validation.get("coverage") or {},
+                            "validation": {},
                         }
                     )
                     for target in kept_targets:
@@ -245,7 +225,14 @@ class ScrapingAgent:
                     "coverage_snapshot": coverage_snapshot,
                     "fallback_used": fallback_used_any,
                 }
+                if cumulative_packet is not None:
+                    packet = await self._merge_incremental_packet(
+                        previous_packet=cumulative_packet,
+                        new_packet=packet,
+                        research_context=research_context,
+                    )
                 packets.append(packet)
+                cumulative_packet = packet
                 self.logger.info(
                     "scraping_iteration_complete",
                     extra={
@@ -542,6 +529,294 @@ class ScrapingAgent:
             "coverage_threshold": self.COVERAGE_THRESHOLD,
         }
 
+    def _packet_has_mergeable_results(self, packet: dict | None) -> bool:
+        """Return whether a scraping packet contains reusable research output."""
+        if not isinstance(packet, dict):
+            return False
+        return bool(packet.get("search_log") or packet.get("query_target_map") or packet.get("active_engines"))
+
+    async def _merge_incremental_packet(
+        self,
+        previous_packet: dict | None,
+        new_packet: dict | None,
+        research_context: dict,
+    ) -> dict:
+        """Merge retry output into the previous scraping packet and recompute coverage."""
+        previous_packet = previous_packet or {}
+        new_packet = new_packet or {}
+        merged_query_target_map = self._merge_query_target_map(
+            previous_packet.get("query_target_map") or [],
+            new_packet.get("query_target_map") or [],
+        )
+        merged_search_log = await self._merge_search_log(
+            previous_packet.get("search_log") or [],
+            new_packet.get("search_log") or [],
+        )
+        iteration_index = self._normalize_iteration(
+            new_packet.get("iteration_index") or previous_packet.get("iteration_index")
+        )
+        model_level = str(
+            new_packet.get("model_level")
+            or previous_packet.get("model_level")
+            or self.ROUND_TO_LEVEL.get(iteration_index, "Level_1_Base")
+        )
+        active_engines = sorted(
+            {
+                str(engine).strip()
+                for engine in [*(previous_packet.get("active_engines") or []), *(new_packet.get("active_engines") or [])]
+                if str(engine).strip()
+            }
+        )
+        merged_packet = {
+            "iteration_index": iteration_index,
+            "model_level": model_level,
+            "active_engines": active_engines,
+            "search_log": merged_search_log,
+            "query_target_map": merged_query_target_map,
+            "coverage_snapshot": self._build_coverage_snapshot(
+                query_target_map=merged_query_target_map,
+                search_log=merged_search_log,
+                research_context=research_context,
+            ),
+            "fallback_used": bool(previous_packet.get("fallback_used") or new_packet.get("fallback_used")),
+        }
+        return merged_packet
+
+    async def _merge_search_log(self, previous_log: List[dict], new_log: List[dict]) -> List[dict]:
+        """Merge search-log rows by target, preserving prior passages when retries add less."""
+        merged_rows: Dict[Tuple[str, str], dict] = {}
+        merge_counts: Counter = Counter()
+        ordered_keys: List[Tuple[str, str]] = []
+
+        for row in [*previous_log, *new_log]:
+            normalized = self._normalize_search_log_row(row)
+            if not normalized:
+                continue
+            row_key = self._search_log_row_key(normalized)
+            merge_counts[row_key] += 1
+            if row_key not in merged_rows:
+                merged_rows[row_key] = normalized
+                ordered_keys.append(row_key)
+                continue
+
+            merged_rows[row_key]["extra_hints_applied"] = self._merge_hint_text(
+                merged_rows[row_key].get("extra_hints_applied"),
+                normalized.get("extra_hints_applied"),
+            )
+            merged_rows[row_key]["top_10_passages"] = self._dedupe_passages(
+                [
+                    *(merged_rows[row_key].get("top_10_passages") or []),
+                    *(normalized.get("top_10_passages") or []),
+                ],
+                limit=None,
+            )
+
+        final_log: List[dict] = []
+        for row_key in ordered_keys:
+            row = dict(merged_rows[row_key])
+            row["top_10_passages"] = await self._finalize_merged_passages(
+                target=row.get("target", ""),
+                passages=row.get("top_10_passages") or [],
+                rerank=merge_counts[row_key] > 1,
+            )
+            final_log.append(row)
+        return final_log
+
+    def _normalize_search_log_row(self, row: Any) -> dict:
+        """Normalize a search-log row into a merge-safe shape."""
+        if not isinstance(row, dict):
+            return {}
+        target = str(row.get("target") or "").strip()
+        source_query = str(row.get("source_query") or "").strip()
+        if not target and not source_query:
+            return {}
+        return {
+            "source_query": source_query,
+            "target": target or source_query,
+            "extra_hints_applied": str(row.get("extra_hints_applied") or "").strip(),
+            "top_10_passages": self._dedupe_passages(row.get("top_10_passages") or [], limit=None),
+        }
+
+    def _search_log_row_key(self, row: dict) -> Tuple[str, str]:
+        """Build a stable dedupe key for a search-log row."""
+        source_query = str(row.get("source_query") or "").strip().lower()
+        target = str(row.get("target") or "").strip().lower()
+        return (source_query or target, target)
+
+    async def _finalize_merged_passages(
+        self,
+        target: str,
+        passages: List[dict],
+        rerank: bool,
+    ) -> List[dict]:
+        """Deduplicate merged passages and rerank only when a target was seen multiple times."""
+        deduped = self._dedupe_passages(passages, limit=None)
+        if not deduped:
+            return []
+        if not rerank:
+            return deduped[:10]
+        try:
+            reranked = await self._select_top_passages_with_mmr(
+                query=target,
+                passages=deduped,
+                top_k=10,
+                time_budget_s=5.0,
+            )
+        except Exception as exc:
+            self.logger.warning("Failed to rerank merged passages for target '%s': %s", target, exc)
+            return deduped[:10]
+        return self._dedupe_passages(reranked or deduped, limit=10)
+
+    def _dedupe_passages(self, passages: List[dict], limit: int | None = 10) -> List[dict]:
+        """Deduplicate passages by URL and content while preserving order."""
+        unique_passages: List[dict] = []
+        seen_keys = set()
+        for passage in passages:
+            if not isinstance(passage, dict):
+                continue
+            content = str(passage.get("content") or "").strip()
+            source_url = str(passage.get("source_url") or "").strip()
+            if not content:
+                continue
+            dedupe_key = (source_url.lower(), content.lower())
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            unique_passages.append(
+                {
+                    "content": content,
+                    "source_url": source_url,
+                    "metadata": dict(passage.get("metadata") or {}),
+                }
+            )
+            if limit is not None and len(unique_passages) >= limit:
+                break
+        return unique_passages
+
+    def _merge_query_target_map(self, previous_rows: List[dict], new_rows: List[dict]) -> List[dict]:
+        """Merge query-target rows by source query so retries extend prior coverage."""
+        merged_rows: Dict[str, dict] = {}
+        ordered_keys: List[str] = []
+        index_seed = 0
+
+        for row in [*previous_rows, *new_rows]:
+            normalized = self._normalize_query_target_row(row)
+            if not normalized:
+                continue
+            row_key = self._query_target_row_key(normalized, index_seed)
+            index_seed += 1
+            if row_key not in merged_rows:
+                merged_rows[row_key] = normalized
+                ordered_keys.append(row_key)
+                continue
+
+            existing = merged_rows[row_key]
+            candidate_targets = self._merge_string_list(
+                existing.get("candidate_targets") or [],
+                normalized.get("candidate_targets") or [],
+            )
+            kept_targets = self._merge_string_list(
+                existing.get("kept_targets") or [],
+                normalized.get("kept_targets") or [],
+            )
+            discarded_targets = self._merge_target_payloads(
+                existing.get("discarded_targets") or [],
+                normalized.get("discarded_targets") or [],
+            )
+            validation = dict(existing.get("validation") or {})
+            validation.update(normalized.get("validation") or {})
+            merged_rows[row_key] = {
+                "source_query": existing.get("source_query") or normalized.get("source_query"),
+                "planning_incomplete": bool(
+                    existing.get("planning_incomplete") or normalized.get("planning_incomplete")
+                ),
+                "targets_generated": len(candidate_targets),
+                "targets_kept": len(kept_targets),
+                "targets_discarded": len(discarded_targets),
+                "candidate_targets": candidate_targets,
+                "kept_targets": kept_targets,
+                "discarded_targets": discarded_targets,
+                "fallback_used": bool(existing.get("fallback_used") or normalized.get("fallback_used")),
+                "unresolved": not bool(kept_targets),
+                "validation": validation,
+            }
+
+        return [merged_rows[row_key] for row_key in ordered_keys]
+
+    def _normalize_query_target_row(self, row: Any) -> dict:
+        """Normalize a query-target row into a consistent merge shape."""
+        if not isinstance(row, dict):
+            return {}
+        source_query = str(row.get("source_query") or "").strip()
+        candidate_targets = self._merge_string_list(row.get("candidate_targets") or [])
+        kept_targets = self._merge_string_list(row.get("kept_targets") or [])
+        discarded_targets = self._merge_target_payloads(row.get("discarded_targets") or [])
+        if not source_query and not candidate_targets and not kept_targets:
+            return {}
+        return {
+            "source_query": source_query,
+            "planning_incomplete": bool(row.get("planning_incomplete")),
+            "targets_generated": len(candidate_targets),
+            "targets_kept": len(kept_targets),
+            "targets_discarded": len(discarded_targets),
+            "candidate_targets": candidate_targets,
+            "kept_targets": kept_targets,
+            "discarded_targets": discarded_targets,
+            "fallback_used": bool(row.get("fallback_used")),
+            "unresolved": not bool(kept_targets),
+            "validation": dict(row.get("validation") or {}),
+        }
+
+    def _query_target_row_key(self, row: dict, fallback_index: int) -> str:
+        """Build a stable key for merging query-target rows."""
+        source_query = str(row.get("source_query") or "").strip().lower()
+        if source_query:
+            return f"source::{source_query}"
+        kept_targets = row.get("kept_targets") or row.get("candidate_targets") or []
+        if kept_targets:
+            return f"target::{str(kept_targets[0]).strip().lower()}"
+        return f"row::{fallback_index}"
+
+    def _merge_string_list(self, items_a: List[Any], items_b: Optional[List[Any]] = None) -> List[str]:
+        """Merge string lists while preserving order and removing duplicates."""
+        merged: List[str] = []
+        seen = set()
+        for item in [*(items_a or []), *((items_b or []) if items_b is not None else [])]:
+            text = re.sub(r"\s+", " ", str(item or "").strip())
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(text)
+        return merged
+
+    def _merge_target_payloads(self, items_a: List[Any], items_b: Optional[List[Any]] = None) -> List[Any]:
+        """Merge payload lists used by discarded-target metadata without dropping structure."""
+        merged: List[Any] = []
+        seen = set()
+        for item in [*(items_a or []), *((items_b or []) if items_b is not None else [])]:
+            if isinstance(item, dict):
+                normalized = dict(item)
+                payload_key = str(normalized.get("target") or json.dumps(normalized, sort_keys=True, ensure_ascii=False))
+            else:
+                normalized = re.sub(r"\s+", " ", str(item or "").strip())
+                payload_key = normalized
+            if not payload_key:
+                continue
+            dedupe_key = payload_key.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            merged.append(normalized)
+        return merged
+
+    def _merge_hint_text(self, existing_hint: str, new_hint: str) -> str:
+        """Join hint strings without repeating identical fragments."""
+        parts = self._merge_string_list([existing_hint], [new_hint])
+        return " ; ".join(parts)
+
     async def _decompose_targets(
         self,
         topic: str,
@@ -642,7 +917,7 @@ class ScrapingAgent:
 
     def _select_engines(self, iteration: int, topic: str) -> List[str]:
         if iteration <= 1:
-            return ["tavily"]
+            return ["tavily", "duckduckgo"]
         domain = self._classify_domain(topic)
         return self.DOMAIN_TO_ENGINES.get(domain, self.DOMAIN_TO_ENGINES["general"])
 
@@ -679,7 +954,7 @@ class ScrapingAgent:
             if results:
                 all_results.extend(results)
                 used_engines.add(engine)
-            if failed and engine in self.VERTICAL_ENGINES:
+            if failed:
                 for fallback_engine in self.SEARCH_FALLBACK_ENGINES:
                     if fallback_engine in engines or fallback_engine in used_engines:
                         continue

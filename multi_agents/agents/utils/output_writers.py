@@ -9,13 +9,14 @@ Produces three output file groups:
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
 import aiofiles
 
-CITATION_PATTERN = re.compile(r"\[S(\d+)\]")
+CITATION_PATTERN = re.compile(r"\[(\d+\.\d+)\]")
 
 
 # ── Model Decisions ──────────────────────────────────────────────────────
@@ -234,8 +235,8 @@ def _build_citation_statistics(
 
 
 def collect_cited_ids_from_text(text: str) -> Counter[str]:
-    """Extract [S*] citation IDs from text with frequency counts."""
-    return Counter(f"S{m}" for m in CITATION_PATTERN.findall(text))
+    """Extract [chapter.index] citation IDs from text with frequency counts."""
+    return Counter(m for m in CITATION_PATTERN.findall(text))
 
 
 # ── Async File Writers ───────────────────────────────────────────────────
@@ -283,13 +284,12 @@ async def write_annotated_report(
 # ── Utilities ────────────────────────────────────────────────────────────
 
 
-def _source_sort_key(key: str) -> int:
-    if key.startswith("S"):
-        try:
-            return int(key[1:])
-        except ValueError:
-            return 0
-    return 0
+def _source_sort_key(key: str) -> tuple:
+    parts = key.split(".")
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except (ValueError, IndexError):
+        return (0, 0)
 
 
 # ── Writer Draft Snapshot ────────────────────────────────────────────────
@@ -331,7 +331,6 @@ async def write_writer_draft_snapshot(
     claim_annotations: List[Dict[str, Any]],
 ) -> None:
     """Write drafts/writer_initial_draft.md to output_dir."""
-    import os
     drafts_dir = os.path.join(output_dir, "drafts")
     os.makedirs(drafts_dir, exist_ok=True)
     path = os.path.join(drafts_dir, "writer_initial_draft.md")
@@ -342,33 +341,6 @@ async def write_writer_draft_snapshot(
 
 
 # ── Section Draft Files ──────────────────────────────────────────────────
-
-
-def _build_chapter_citation_map(chapter_num: int, section_evidence: List[dict]) -> Dict[str, str]:
-    """Build {global_id: "[chapter.index]"} mapping from a section's evidence list.
-
-    Only entries with a global_id are included (i.e. after remap).
-    """
-    result: Dict[str, str] = {}
-    for idx, entry in enumerate(section_evidence or [], start=1):
-        if not isinstance(entry, dict):
-            continue
-        global_id = str(entry.get("global_id") or "").strip()
-        if global_id:
-            result[global_id] = f"[{chapter_num}.{idx}]"
-    return result
-
-
-def convert_to_chapter_citations(text: str, citation_map: Dict[str, str]) -> str:
-    """Replace [Sx] markers with [chapter.index] using the provided map."""
-    if not citation_map:
-        return text
-
-    def replacer(match: re.Match) -> str:
-        key = f"S{match.group(1)}"
-        return citation_map.get(key, match.group(0))
-
-    return re.sub(r"\[S(\d+)\]", replacer, text)
 
 
 def _extract_section_body_text(research_data_item: Any) -> str:
@@ -391,11 +363,9 @@ def extract_section_summary_fallback(section_body: str) -> str:
 def format_section_content_draft(
     section_title: str,
     section_body: str,
-    citation_map: Optional[Dict[str, str]] = None,
 ) -> str:
     """Render content.md for a section draft."""
-    body = convert_to_chapter_citations(section_body, citation_map or {})
-    return f"# {section_title}\n\n{body}\n"
+    return f"# {section_title}\n\n{section_body}\n"
 
 
 def format_section_summary_draft(section_title: str, summary: str) -> str:
@@ -408,18 +378,34 @@ def format_section_evidence_draft(
     section_title: str,
     section_evidence: List[dict],
 ) -> str:
-    """Render evidence.md with [chapter.index] citation labels."""
+    """Render evidence.md with [chapter.index] citation labels.
+
+    Uses entry['global_id'] as the label when available (set by remap step).
+    Falls back to chapter_num.idx for entries that were not remapped.
+    """
     if not section_evidence:
         return f"# Evidence: {section_title}\n\n_No evidence collected for this section._\n"
     lines = [f"# Evidence: {section_title}\n"]
-    for idx, entry in enumerate(section_evidence, start=1):
+
+    def _ev_sort_key(e: dict) -> tuple:
+        gid = str(e.get("global_id") or "")
+        parts = gid.split(".")
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except (IndexError, ValueError):
+            return (9999, 9999)
+
+    sorted_evidence = sorted(section_evidence, key=_ev_sort_key)
+    for idx, entry in enumerate(sorted_evidence, start=1):
         if not isinstance(entry, dict):
             continue
         used = entry.get("used_in_draft", False)
         source_url = entry.get("source_url") or ""
         domain = entry.get("domain") or ""
         content = entry.get("content") or ""
-        label = f"{chapter_num}.{idx}"
+        # 优先用 remap 后写入的 global_id，保证与 content.md 引用一致
+        global_id = str(entry.get("global_id") or "").strip()
+        label = global_id if global_id else f"{chapter_num}.{idx}"
         lines.append(f"### [{label}] ({'cited' if used else 'unused'})")
         lines.append(f"- **URL**: {source_url}")
         lines.append(f"- **Domain**: {domain}")
@@ -469,6 +455,21 @@ def _parse_evidence_from_md(md_text: str) -> List[dict]:
     return entries
 
 
+def _resolve_section_dir(output_dir: str, section_key: str) -> str:
+    """Return existing section dir with same index prefix, or canonical path if none found."""
+    drafts_dir = os.path.join(output_dir, "drafts")
+    canonical = os.path.join(drafts_dir, section_key)
+    if os.path.isdir(canonical):
+        return canonical
+    m = re.match(r"^(section_\d+)_", section_key)
+    if m and os.path.isdir(drafts_dir):
+        prefix = m.group(1) + "_"
+        for name in sorted(os.listdir(drafts_dir)):
+            if name.startswith(prefix) and os.path.isdir(os.path.join(drafts_dir, name)):
+                return os.path.join(drafts_dir, name)
+    return canonical
+
+
 async def write_section_draft_files(
     output_dir: str,
     chapter_num: int,
@@ -477,7 +478,6 @@ async def write_section_draft_files(
     section_body: str,
     summary: str,
     section_evidence: Optional[List[dict]],
-    citation_map: Optional[Dict[str, str]] = None,
     incremental_evidence: bool = False,
 ) -> None:
     """Write drafts/{section_key}/content.md, summary.md, and evidence.md.
@@ -487,12 +487,11 @@ async def write_section_draft_files(
         incremental_evidence: If True and evidence.md exists, merge new entries
             with existing ones (dedup by URL+content) before writing.
     """
-    import os
-    section_dir = os.path.join(output_dir, "drafts", section_key)
+    section_dir = _resolve_section_dir(output_dir, section_key)
     os.makedirs(section_dir, exist_ok=True)
 
     # content.md
-    content_text = format_section_content_draft(section_title, section_body, citation_map)
+    content_text = format_section_content_draft(section_title, section_body)
     async with aiofiles.open(os.path.join(section_dir, "content.md"), "w", encoding="utf-8") as f:
         await f.write(content_text)
 

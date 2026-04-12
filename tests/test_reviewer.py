@@ -23,8 +23,8 @@ def agent():
 @pytest.fixture
 def source_index():
     return {
-        "S1": {"content": "Apple revenue $128B in Q1 2024", "source_url": "https://reuters.com/a", "domain": "reuters.com"},
-        "S2": {"content": "Apple Q1 earnings beat estimates", "source_url": "https://bloomberg.com/b", "domain": "bloomberg.com"},
+        "1.1": {"content": "Apple revenue $128B in Q1 2024", "source_url": "https://reuters.com/a", "domain": "reuters.com"},
+        "1.2": {"content": "Apple Q1 earnings beat estimates", "source_url": "https://bloomberg.com/b", "domain": "bloomberg.com"},
     }
 
 
@@ -58,14 +58,28 @@ class TestExtractChangedParagraphs:
 class TestBuildCondensedSources:
     def test_basic_output(self, source_index):
         result = _build_condensed_sources(source_index)
-        assert "[S1]" in result
-        assert "[S2]" in result
+        assert "[1.1]" in result
+        assert "[1.2]" in result
         assert "reuters.com" in result
 
     def test_respects_limit(self, source_index):
         result = _build_condensed_sources(source_index, limit=1)
-        assert "[S1]" in result
-        assert "[S2]" not in result
+        assert "[1.1]" in result
+        assert "[1.2]" not in result
+
+    def test_accepts_mixed_source_id_formats(self):
+        mixed_index = {
+            "2.1": {"content": "Second chapter evidence", "domain": "example.com"},
+            "S1": {"content": "Legacy source id", "domain": "legacy.example"},
+            "1.1": {"content": "First chapter evidence", "domain": "example.com"},
+        }
+
+        result = _build_condensed_sources(mixed_index)
+
+        lines = result.splitlines()
+        assert lines[0].startswith("[1.1]")
+        assert lines[1].startswith("[2.1]")
+        assert lines[2].startswith("[S1]")
 
     def test_empty_index(self):
         assert _build_condensed_sources({}) == ""

@@ -19,7 +19,7 @@ class ClaimVerifierAgent:
     """
 
     MAX_REFLEXION = 3
-    CITATION_PATTERN = re.compile(r"\[S(\d+)\]")
+    CITATION_PATTERN = re.compile(r"\[(\d+\.\d+)\]")
     FALLBACK_THRESHOLD = 0.5  # trigger fallback if < 50% sentences have citations
 
     def __init__(self, websocket=None, stream_output=None, headers=None):
@@ -33,11 +33,10 @@ class ClaimVerifierAgent:
     def build_source_index(
         self,
         scraping_packets: List[dict],
-        start_id: int = 1,
         section_contexts: Optional[List[dict]] = None,
         existing_index: Optional[dict] = None,
     ) -> Tuple[dict, str]:
-        """Assign [S1], [S2]... to each evidence passage.
+        """Assign [1.1], [1.2]... to each evidence passage by chapter and position.
 
         Args:
             scraping_packets: List of scraping packet dicts with search_log.
@@ -51,7 +50,6 @@ class ClaimVerifierAgent:
             is the indexed research data for the writer prompt.
         """
         index: Dict[str, dict] = {}
-        current_id = start_id
         seen_fingerprints = self._collect_existing_fingerprints(existing_index)
         normalized_contexts = list(section_contexts or [])
 
@@ -66,6 +64,10 @@ class ClaimVerifierAgent:
             section_key = str(section_context.get("section_key") or "").strip()
             section_title = str(section_context.get("section_title") or "").strip()
             section_index = section_context.get("section_index")
+            # Use explicit section_index from context so chapter number is stable
+            # regardless of the order scraping_packets are passed in.
+            chapter_num = (int(section_index) + 1) if section_index is not None else (packet_idx + 1)
+            passage_counter = 0
             for log_entry in packet.get("search_log", []):
                 if not isinstance(log_entry, dict):
                     continue
@@ -87,7 +89,8 @@ class ClaimVerifierAgent:
                     seen_fingerprints.add(fingerprint)
 
                     domain = self._extract_domain(source_url)
-                    key = f"S{current_id}"
+                    passage_counter += 1
+                    key = f"{chapter_num}.{passage_counter}"
                     index[key] = {
                         "content": content,
                         "source_url": source_url,
@@ -96,7 +99,6 @@ class ClaimVerifierAgent:
                         "section_title": section_title,
                         "section_index": section_index,
                     }
-                    current_id += 1
 
         return index, self.format_source_index(index)
 
@@ -166,7 +168,7 @@ class ClaimVerifierAgent:
             if not raw:
                 continue
             ids_found = self.CITATION_PATTERN.findall(raw)
-            source_ids = [f"S{sid}" for sid in ids_found]
+            source_ids = ids_found  # already in "chapter.index" format
             # Clean sentence text (remove citation markers)
             clean_text = self.CITATION_PATTERN.sub("", raw).strip()
             clean_text = re.sub(r"\s+", " ", clean_text).strip()
@@ -205,7 +207,7 @@ class ClaimVerifierAgent:
 
         # Build a condensed source list for the prompt
         source_summary = []
-        for key, info in sorted(source_index.items(), key=lambda x: int(x[0][1:])):
+        for key, info in sorted(source_index.items(), key=lambda x: self._source_sort_key((x[0], None))):
             snippet = info["content"][:200]
             source_summary.append(f"[{key}]({info['domain']}) {snippet}")
         sources_text = "\n".join(source_summary[:50])  # limit to 50 sources
@@ -232,7 +234,7 @@ Evidence Sources:
 Return a JSON array where each element has:
 - "sentence": the original sentence containing the claim
 - "claim_text": the specific factual claim
-- "source_ids": list of matching source IDs (e.g., ["S1", "S3"]), or [] if no match
+- "source_ids": list of matching source IDs (e.g., ["1.1", "1.3"]), or [] if no match
 - "section": "introduction" or "conclusion"
 
 Return ONLY the JSON array, no markdown fences.""",
@@ -715,14 +717,13 @@ Return ONLY the JSON, no markdown fences.""",
         normalized_section = str(section_key or "").strip().lower()
         return "||".join([normalized_section, normalized_url, normalized_content])
 
-    def _source_sort_key(self, item: Tuple[str, Any]) -> int:
+    def _source_sort_key(self, item: Tuple[str, Any]) -> Tuple[int, int]:
         source_id = str(item[0] or "")
-        if source_id.startswith("S"):
-            try:
-                return int(source_id[1:])
-            except ValueError:
-                return 0
-        return 0
+        parts = source_id.split(".")
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError):
+            return (0, 0)
 
     def _split_sentences(self, text: str) -> List[str]:
         """Split text into sentences, preserving citation markers."""

@@ -854,9 +854,134 @@ class TestRunDepthScrap:
         assert "scraping_packet" in result
 
     async def test_single_iteration_override(self):
+        """An explicit iteration override should propagate to the result packet."""
         agent = self._make_agent_with_mocks()
         result = await agent.run_depth_scraping(_draft_state(iteration_index=2))
         assert result["iteration_index"] == 2
+
+    async def test_retry_iteration_preserves_previous_passages(self):
+        """Retry iterations should keep prior evidence when the new round returns nothing useful."""
+        agent = self._make_agent_with_mocks(collect_return=([], ["duckduckgo"]))
+        previous_packet = {
+            "iteration_index": 1,
+            "model_level": "Level_1_Base",
+            "active_engines": ["tavily"],
+            "search_log": [
+                {
+                    "source_query": "AI employment 2024",
+                    "target": "AI employment 2024",
+                    "extra_hints_applied": "",
+                    "top_10_passages": [make_passage("AI employment 2024 objective data point")],
+                }
+            ],
+            "query_target_map": [
+                {
+                    "source_query": "AI employment 2024",
+                    "planning_incomplete": False,
+                    "targets_generated": 1,
+                    "targets_kept": 1,
+                    "targets_discarded": 0,
+                    "candidate_targets": ["AI employment 2024"],
+                    "kept_targets": ["AI employment 2024"],
+                    "discarded_targets": [],
+                    "fallback_used": False,
+                    "unresolved": False,
+                    "validation": {},
+                }
+            ],
+            "coverage_snapshot": {},
+            "fallback_used": False,
+        }
+        state = _draft_state(iteration_index=2)
+        state["scraping_packet"] = previous_packet
+
+        result = await agent.run_depth_scraping(state)
+        packet = result["scraping_packet"]
+
+        assert packet["iteration_index"] == 2
+        assert packet["coverage_snapshot"]["query_covered"] == 1
+        assert packet["coverage_snapshot"]["query_total"] == 1
+        assert packet["search_log"][0]["top_10_passages"][0]["content"] == "AI employment 2024 objective data point"
+        assert packet["active_engines"] == ["duckduckgo", "tavily"]
+
+    async def test_merge_incremental_packet_recomputes_coverage_across_rounds(self):
+        """Merged retry packets should compute coverage from the union of old and new queries."""
+        agent = self._make_agent_with_mocks()
+        previous_packet = {
+            "iteration_index": 1,
+            "model_level": "Level_1_Base",
+            "active_engines": ["tavily"],
+            "search_log": [
+                {
+                    "source_query": "AI employment 2024",
+                    "target": "AI employment 2024",
+                    "extra_hints_applied": "",
+                    "top_10_passages": [make_passage("AI employment 2024 objective data point")],
+                }
+            ],
+            "query_target_map": [
+                {
+                    "source_query": "AI employment 2024",
+                    "planning_incomplete": False,
+                    "targets_generated": 1,
+                    "targets_kept": 1,
+                    "targets_discarded": 0,
+                    "candidate_targets": ["AI employment 2024"],
+                    "kept_targets": ["AI employment 2024"],
+                    "discarded_targets": [],
+                    "fallback_used": False,
+                    "unresolved": False,
+                    "validation": {},
+                }
+            ],
+            "coverage_snapshot": {},
+            "fallback_used": False,
+        }
+        new_packet = {
+            "iteration_index": 2,
+            "model_level": "Level_2_Pro",
+            "active_engines": ["duckduckgo"],
+            "search_log": [
+                {
+                    "source_query": "AI wages 2024",
+                    "target": "AI wages 2024",
+                    "extra_hints_applied": "focus on wage impacts",
+                    "top_10_passages": [make_passage("AI wages 2024 objective wage data point")],
+                }
+            ],
+            "query_target_map": [
+                {
+                    "source_query": "AI wages 2024",
+                    "planning_incomplete": False,
+                    "targets_generated": 1,
+                    "targets_kept": 1,
+                    "targets_discarded": 0,
+                    "candidate_targets": ["AI wages 2024"],
+                    "kept_targets": ["AI wages 2024"],
+                    "discarded_targets": [],
+                    "fallback_used": False,
+                    "unresolved": False,
+                    "validation": {},
+                }
+            ],
+            "coverage_snapshot": {},
+            "fallback_used": False,
+        }
+
+        merged = await agent._merge_incremental_packet(
+            previous_packet=previous_packet,
+            new_packet=new_packet,
+            research_context={"key_points": []},
+        )
+
+        assert merged["iteration_index"] == 2
+        assert merged["coverage_snapshot"]["query_total"] == 2
+        assert merged["coverage_snapshot"]["query_covered"] == 2
+        assert merged["coverage_snapshot"]["section_coverage"] == 1.0
+        assert {row["source_query"] for row in merged["query_target_map"]} == {
+            "AI employment 2024",
+            "AI wages 2024",
+        }
 
     async def test_decompose_exception_does_not_crash(self):
         """503-style LLM failure is caught inside _decompose_query_to_targets (not at the call site)."""

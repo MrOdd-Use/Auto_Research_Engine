@@ -22,16 +22,24 @@ It is built for research-heavy workflows such as market analysis, technical inve
 - **Node rerun support.** `节点回溯` (`Rerun from Checkpoint`) lets you rerun a single workflow node or section instead of restarting the entire report.
 - **Production-facing interfaces.** The repo includes FastAPI, WebSocket streaming, a Next.js frontend, CLI usage, exports, tests, and docs.
 - **Pluggable architecture.** Retrievers, scrapers, model providers, vector stores, and MCP integrations can be swapped without redesigning the whole stack.
+- **Intent-aware pipeline.** `IntentRecognizer` classifies query intent (`analytical`, `descriptive`, `comparative`, `exploratory`) and normalizes the query before planning, so the outline and research strategy reflect what the user actually wants to understand.
+- **Section-level synthesis.** `SectionSynthesizer` converts accepted evidence passages into structured markdown prose with sub-headers and inline `[Sx]` citations, keeping every factual claim grounded before the global writer runs.
+- **Persistent opinion tracking.** `OpinionsStore` accumulates reviewer and human opinions across multiple review rounds and tracks resolution status (`pending` → `resolved` / `unresolved` / `partially_resolved`), so no feedback item is silently dropped.
+- **Human review breakpoints.** The pipeline pauses at configurable checkpoints — outline review, reviewer feedback, and writer output — for human input before proceeding.
+- **Scraper fallback chain.** The scraper tries multiple backends in sequence and falls back gracefully when a source is unreachable or context is exceeded.
 
 ## How It Works
 
 1. A user submits a research task through the CLI, API, WebSocket, or frontend.
-2. The planner creates a structured outline from the task and the initial research context.
-3. Each section runs through its own research pipeline in parallel.
-4. `check_data` decides whether the evidence for a section is sufficient, should retry, or should stop.
-5. The writer composes the introduction and conclusion from indexed section evidence and emits `claim_annotations`.
-6. `ClaimVerifier` parses citations, checks support across domains, and can trigger targeted `Reflexion` reruns for suspicious sections.
-7. Reviewer and reviser agents run a final quality loop with guideline checks plus source-aware hallucination auditing before the publisher exports Markdown, PDF, and DOCX.
+2. `IntentRecognizer` classifies query intent, normalizes the query, and produces a research goal. This output propagates through the entire pipeline.
+3. The planner creates a structured outline from the task and the initial research context.
+4. Each section runs through its own research pipeline in parallel.
+5. `check_data` decides whether the evidence for a section is sufficient, should retry, or should stop.
+6. `SectionSynthesizer` converts accepted evidence passages into structured markdown prose with sub-headers and `[Sx]` citations, building a per-section local source index that is later remapped to the global `source_index`.
+7. The writer composes the introduction and conclusion from indexed section evidence and emits `claim_annotations`.
+8. `ClaimVerifier` parses citations, checks support across domains, and can trigger targeted `Reflexion` reruns for suspicious sections.
+9. `OpinionsStore` accumulates reviewer-agent and human opinions across review rounds, tracking each item's resolution status.
+10. Reviewer and reviser agents run a final quality loop with guideline checks plus source-aware hallucination auditing before the publisher exports Markdown, PDF, and DOCX.
 
 ## Node Rerun
 
@@ -171,6 +179,9 @@ tests/            Automated tests
 - `backend/server/workflow_store.py` persists workflow sessions for `Rerun from Checkpoint`
 - `frontend/nextjs/` provides report history, session switching, and rerun controls
 - `tests/test_workflow_sessions.py` covers multi-round reruns and checkpoint behavior
+- `multi_agents/agents/intent_recognizer.py` classifies query intent and normalizes the query before planning
+- `multi_agents/agents/section_synthesizer.py` converts evidence passages into structured section bodies with sub-headers and citations
+- `multi_agents/memory/opinions.py` accumulates and tracks reviewer and human opinions across review rounds
 
 ## Documentation
 

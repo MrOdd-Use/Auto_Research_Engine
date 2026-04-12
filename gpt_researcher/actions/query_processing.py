@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None) -> List[Dict[str, Any]]:
+async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None, fallback_retrievers: List[Any] = None) -> List[Dict[str, Any]]:
     """
     Get web search results for a given query.
 
@@ -18,21 +18,30 @@ async def get_search_results(query: str, retriever: Any, query_domains: List[str
         retriever: The retriever instance
         query_domains: Optional list of domains to search
         researcher: The researcher instance (needed for MCP retrievers)
+        fallback_retrievers: Optional list of retriever classes to try if primary returns empty
 
     Returns:
         A list of search results
     """
-    # Check if this is an MCP retriever and pass the researcher instance
-    if "mcpretriever" in retriever.__name__.lower():
-        search_retriever = retriever(
-            query, 
-            query_domains=query_domains,
-            researcher=researcher  # Pass researcher instance for MCP retrievers
-        )
-    else:
-        search_retriever = retriever(query, query_domains=query_domains)
-    
-    return search_retriever.search()
+    def _do_search(r: Any) -> List[Dict[str, Any]]:
+        if "mcpretriever" in r.__name__.lower():
+            return r(query, query_domains=query_domains, researcher=researcher).search()
+        return r(query, query_domains=query_domains).search()
+
+    results = _do_search(retriever)
+    if results:
+        return results
+
+    for fb in (fallback_retrievers or []):
+        try:
+            results = _do_search(fb)
+            if results:
+                logger.warning(f"Primary retriever {retriever.__name__} returned empty, used fallback: {fb.__name__}")
+                return results
+        except Exception as e:
+            logger.warning(f"Fallback retriever {fb.__name__} also failed: {e}")
+
+    return []
 
 async def generate_sub_queries(
     query: str,

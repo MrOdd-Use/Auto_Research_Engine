@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, List
 from urllib.parse import urlparse
 
@@ -11,7 +12,7 @@ _SYNTHESIS_SYSTEM = (
     "Your task is to synthesize verified evidence passages into a well-structured "
     "research report section. Write authoritative, analytical prose. "
     "Cite every factual claim immediately after the sentence using numeric source IDs "
-    "from the provided evidence list, e.g. 'Revenue reached $128B [S1][S2].'. "
+    "from the provided evidence list, e.g. 'Revenue reached $128B [1.1][1.2].'. "
     "Only use source IDs that appear in the evidence list. "
     "Do not invent facts not present in the evidence."
 )
@@ -107,10 +108,15 @@ class SectionSynthesizerAgent:
         if isinstance(result, dict):
             section_body = str(result.get("section_body") or "").strip()
             section_summary = str(result.get("section_summary") or "").strip()
-            used_ids = [
+            # 从正文实际引用中提取，比 LLM 自报的 used_source_ids 更可靠
+            cited_in_body = {
+                f"S{m}" for m in re.findall(r"\[S(\d+)\]", section_body, re.IGNORECASE)
+            }
+            llm_reported = {
                 str(x) for x in (result.get("used_source_ids") or [])
                 if str(x) in local_index
-            ]
+            }
+            used_ids = list((cited_in_body | llm_reported) & local_index.keys())
 
         if not section_body:
             await self._emit_log(

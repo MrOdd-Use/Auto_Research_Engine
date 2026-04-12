@@ -1,5 +1,6 @@
 import difflib
-from typing import List, Optional
+import re
+from typing import Any, List, Optional, Tuple
 
 from .utils.views import print_agent_output
 from .utils.llms import call_model
@@ -70,9 +71,20 @@ def _extract_changed_paragraphs(previous: str, current: str) -> List[str]:
     return changed
 
 
+def _source_sort_key(item: Tuple[str, Any]) -> Tuple[int, Tuple[int, ...], str]:
+    """Sort source ids safely across legacy and chapter-based key formats."""
+    source_id = str(item[0] or "").strip()
+    numeric_parts = tuple(int(part) for part in re.findall(r"\d+", source_id))
+    if re.fullmatch(r"\d+(?:\.\d+)*", source_id):
+        return (0, numeric_parts, source_id)
+    if numeric_parts:
+        return (1, numeric_parts, source_id)
+    return (2, tuple(), source_id)
+
+
 def _build_condensed_sources(source_index: dict, limit: int = 50) -> str:
     """Build a condensed source list for the review prompt."""
-    entries = sorted(source_index.items(), key=lambda x: int(x[0][1:]))[:limit]
+    entries = sorted(source_index.items(), key=_source_sort_key)[:limit]
     lines = []
     for key, info in entries:
         snippet = info.get("content", "")[:200]

@@ -26,12 +26,23 @@ class Subtopics(BaseModel):
     subtopics: List[Subtopic] = []
 
 
+class KeyPoint(BaseModel):
+    """A single key point with its own concrete search queries."""
+    point: str = Field(description="What to investigate", min_length=1)
+    search_queries: List[str] = Field(
+        default_factory=list,
+        description="1-2 concrete search targets scoped to this key point",
+    )
+
+
 class SectionOutline(BaseModel):
     """A single section in the research outline with enriched context."""
     header: str = Field(description="Section title", min_length=1)
     description: str = Field(description="One-sentence scope description")
-    key_points: List[str] = Field(default_factory=list, description="2-3 points to investigate")
-    research_queries: List[str] = Field(default_factory=list, description="2-3 search queries")
+    key_points: List[KeyPoint] = Field(
+        default_factory=list,
+        description="2-4 key points, each with 1-2 search queries",
+    )
 
 
 class ResearchOutline(BaseModel):
