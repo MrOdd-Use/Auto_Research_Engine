@@ -33,7 +33,13 @@ from multi_agents.memory.opinions import (
     parse_review_to_items,
 )
 from multi_agents.workflow_session import WorkflowSessionRecorder
-from .utils.output_writers import write_model_decisions
+from .utils.output_writers import (
+    write_model_decisions,
+    write_writer_draft_snapshot,
+    write_section_draft_files,
+    _build_chapter_citation_map,
+    _extract_section_body_text,
+)
 
 
 class ChiefEditorAgent:
@@ -607,6 +613,7 @@ class ChiefEditorAgent:
                 start_from_section_node=section_start_node,
                 section_state_before=section_state_before,
                 note=note,
+                output_dir=self.output_dir,
             )
         except TypeError as exc:
             if "unexpected keyword argument" not in str(exc):
@@ -718,7 +725,7 @@ class ChiefEditorAgent:
         *,
         section_index: int,
     ) -> None:
-        for key in ("research_data", "scraping_packets", "check_data_reports"):
+        for key in ("research_data", "scraping_packets", "check_data_reports", "section_evidences"):
             new_values = rerun_result.get(key)
             if not isinstance(new_values, list) or section_index >= len(new_values):
                 continue
@@ -771,6 +778,100 @@ class ChiefEditorAgent:
         state["source_index"] = source_index
         state["indexed_research_data"] = verifier.format_source_index(source_index)
         return state
+
+    async def _remap_section_drafts_to_global_index(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Remap per-section local [S1]..[Sn] citations to global source_index IDs.
+
+        SectionSynthesizerAgent assigns local S1..Sn within each section. After the
+        global source_index is built by ClaimVerifierAgent, this method matches each
+        local passage by (source_url, content) fingerprint and rewrites all [Sx]
+        citations in research_data to their global equivalents.
+
+        After remapping, rewrites each section's draft files with [chapter.index] citations.
+        """
+        source_index = state.get("source_index")
+        section_evidences = state.get("section_evidences")
+        research_data = state.get("research_data")
+        if not source_index or not section_evidences or not research_data:
+            return state
+
+        fp_to_global: Dict[str, str] = {}
+        for global_id, info in source_index.items():
+            if not isinstance(info, dict):
+                continue
+            content = re.sub(r"\s+", " ", str(info.get("content") or "").strip().lower())
+            source_url = str(info.get("source_url") or "").strip().lower()
+            fp_to_global[f"{source_url}||{content}"] = global_id
+
+        remapped_data = list(research_data)
+        remapped_ev = list(section_evidences)
+
+        for i, section_ev in enumerate(section_evidences):
+            if not isinstance(section_ev, list):
+                continue
+            local_to_global: Dict[str, str] = {}
+            for entry in section_ev:
+                if not isinstance(entry, dict):
+                    continue
+                local_id = str(entry.get("local_id") or "")
+                content = re.sub(r"\s+", " ", str(entry.get("content") or "").strip().lower())
+                source_url = str(entry.get("source_url") or "").strip().lower()
+                global_id = fp_to_global.get(f"{source_url}||{content}")
+                if global_id:
+                    local_to_global[local_id] = global_id
+                    entry["global_id"] = global_id
+
+            if not local_to_global or i >= len(remapped_data):
+                continue
+            draft = remapped_data[i]
+            if isinstance(draft, dict):
+                remapped_data[i] = {
+                    k: self._replace_citation_ids(v, local_to_global) if isinstance(v, str) else v
+                    for k, v in draft.items()
+                }
+            remapped_ev[i] = section_ev
+
+        state["research_data"] = remapped_data
+        state["section_evidences"] = remapped_ev
+
+        # Rewrite draft files with [chapter.index] citations now that global IDs are known
+        section_details = state.get("section_details") or []
+        section_summaries = state.get("section_summaries") or []
+        for i, section_ev in enumerate(remapped_ev):
+            if not isinstance(section_ev, list):
+                continue
+            citation_map = _build_chapter_citation_map(i + 1, section_ev)
+            if not citation_map:
+                continue
+            detail = section_details[i] if i < len(section_details) else {}
+            section_title = str(detail.get("header") or f"Section {i + 1}").strip()
+            from multi_agents.workflow_session import _section_slug
+            section_key = _section_slug(i, section_title)
+            section_body = _extract_section_body_text(
+                remapped_data[i] if i < len(remapped_data) else None
+            )
+            summary = section_summaries[i] if i < len(section_summaries) else ""
+            await write_section_draft_files(
+                output_dir=self.output_dir,
+                chapter_num=i + 1,
+                section_key=section_key,
+                section_title=section_title,
+                section_body=section_body,
+                summary=summary,
+                section_evidence=section_ev,
+                citation_map=citation_map,
+                incremental_evidence=False,
+            )
+
+        return state
+
+    @staticmethod
+    def _replace_citation_ids(text: str, id_map: Dict[str, str]) -> str:
+        """Replace [S1]..[Sn] local citation markers with global IDs."""
+        def replacer(match: re.Match) -> str:
+            local_id = f"S{match.group(1)}"
+            return f"[{id_map.get(local_id, local_id)}]"
+        return re.sub(r"\[S(\d+)\]", replacer, text)
 
     async def _run_claim_review(
         self,
@@ -883,10 +984,10 @@ class ChiefEditorAgent:
         *,
         writer_note: str | None = None,
     ) -> Dict[str, Any]:
-        """Run writer → claim_review → review_cycle (with source-aware Reviewer) → annotate."""
-        # Inject source index before writer
+        """Run writer → [human breakpoint] → claim_review → review_cycle → annotate."""
         state = self._prepare_for_writer_pass(state)
         state = await self._inject_source_index(state)
+        state = await self._remap_section_drafts_to_global_index(state)
 
         # Run writer
         state = await self._run_global_node(
@@ -897,11 +998,27 @@ class ChiefEditorAgent:
             note=writer_note,
         )
 
+        # Always save initial draft snapshot (before any review/revision)
+        draft_layout = self._workflow_agents["publisher"].generate_layout(state)
+        claim_annotations = list(state.get("claim_annotations") or [])
+        await write_writer_draft_snapshot(self.output_dir, draft_layout, claim_annotations)
+
+        # Human breakpoint: inspect draft before review
+        task = state.get("task") or {}
+        reviewer_note: str | None = None
+        if task.get("include_writer_review"):
+            result = await self._workflow_agents["human"].review_writer_draft(
+                draft_layout, claim_annotations, task
+            )
+            if result.get("force_publish"):
+                return state
+            reviewer_note = result.get("reviewer_note")
+
         # Claim verification + reflexion
         state = await self._run_claim_review(state, recorder)
 
         # Review cycle — Reviewer now handles hallucination detection via diff + source_index
-        state = await self._run_review_cycle(state, recorder)
+        state = await self._run_review_cycle(state, recorder, reviewer_note=reviewer_note)
 
         # Annotate AFTER review cycle (clean text during review)
         return await self._annotate_if_needed(state)

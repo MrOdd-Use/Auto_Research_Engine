@@ -1,17 +1,26 @@
 from datetime import datetime
+import re
 import json5 as json
 from .utils.views import print_agent_output
 from .utils.llms import call_model
 from multi_agents.route_agent import build_route_context
+from gpt_researcher.context.compression import truncate_research_data
 
 sample_json = """
 {
-  "table_of_contents": A table of contents in markdown syntax (using '-') based on the research headers and subheaders,
-  "introduction": An indepth introduction to the topic in markdown syntax and hyperlink references to relevant sources. Each factual claim MUST cite source IDs e.g. 'Revenue reached $128B [S1][S2].',
-  "conclusion": A conclusion to the entire research based on all research data in markdown syntax and hyperlink references to relevant sources. Each factual claim MUST cite source IDs.,
-  "sources": A list with strings of all used source links in the entire research data in markdown syntax and apa citation format. For example: ['-  Title, year, Author [source url](source)', ...],
+  "introduction": An in-depth introduction in markdown syntax. Cite every factual claim immediately after the sentence using numeric source IDs, e.g. 'Jobs displaced by 2030[S1][S2].',
+  "conclusion": A conclusion in markdown syntax. Cite every factual claim using numeric source IDs, e.g. 'Productivity gains reached 40%[S3].',
+  "sources": A list with strings of all used source links in APA citation format with markdown hyperlinks. For example: ['-  Title, year, Author [source url](source)', ...],
   "claim_annotations": A list of objects for each factual claim: [{"sentence": "the factual claim sentence", "source_ids": ["S1", "S2"], "section": "introduction"}, ...]
 }
+"""
+
+TOC_SAMPLE = """
+- Chapter Title One
+  - Sub-topic A
+  - Sub-topic B
+- Chapter Title Two
+  - Sub-topic C
 """
 
 
@@ -31,10 +40,123 @@ class WriterAgent:
             "references": "References",
         }
 
+    def _format_research_data(self, data) -> str:
+        parts = []
+        for item in (data or []):
+            if isinstance(item, dict):
+                for title, body in item.items():
+                    parts.append(f"## {title}\n\n{body}")
+            elif isinstance(item, str) and item.strip():
+                parts.append(item)
+        return "\n\n---\n\n".join(parts)
+
+    def _format_summaries(self, research_state: dict) -> str:
+        """Format per-section summaries for the TOC generation prompt."""
+        section_details = research_state.get("section_details") or []
+        section_summaries = research_state.get("section_summaries") or []
+        lines = []
+        for i, detail in enumerate(section_details):
+            title = str(detail.get("header") or f"Section {i + 1}").strip()
+            summary = section_summaries[i] if i < len(section_summaries) else ""
+            lines.append(f"Chapter {i + 1}: {title}")
+            if summary:
+                lines.append(f"  Summary: {summary}")
+        return "\n".join(lines)
+
+    async def _write_toc_from_summaries(self, research_state: dict) -> str:
+        """Generate TOC via LLM using per-section summaries."""
+        query = research_state.get("title") or ""
+        task = research_state.get("task") or {}
+        summaries_text = self._format_summaries(research_state)
+
+        if not summaries_text.strip():
+            return ""
+
+        prompt = [
+            {
+                "role": "system",
+                "content": "You are a research editor. Generate a markdown table of contents.",
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Report title: {query}\n\n"
+                    f"Chapter summaries:\n{summaries_text}\n\n"
+                    "Generate a markdown table of contents based strictly on the chapters above.\n"
+                    "Rules:\n"
+                    "- Top-level items use '- ' and match the chapter title exactly\n"
+                    "- Sub-items use '  - ' and reflect key sub-topics from the summary\n"
+                    "- Do NOT invent chapters not listed above\n"
+                    "- Return ONLY the markdown list, no other text\n\n"
+                    f"Example format:\n{TOC_SAMPLE}"
+                ),
+            },
+        ]
+
+        route_context = build_route_context(
+            application_name=str(task.get("application_name") or "auto_research_engine"),
+            shared_agent_class="writer_agent",
+            agent_role="writer",
+            stage_name="toc_generation",
+            system_prompt="You are a research editor.",
+            task=query,
+            state=research_state,
+            task_payload=task,
+        )
+        result = await call_model(prompt, task.get("model"), route_context=route_context)
+        if isinstance(result, dict):
+            result = result.get("content") or result.get("text") or ""
+        return str(result or "").strip()
+
+    @staticmethod
+    def _order_sections_by_toc(toc: str, research_data: list) -> list:
+        """Reorder research_data sections to match TOC top-level entry order.
+
+        Matches by lowercased, stripped title. Unmatched sections are appended at the end.
+        """
+        if not toc or not research_data:
+            return list(research_data or [])
+
+        toc_titles = []
+        for line in toc.splitlines():
+            m = re.match(r"^-\s+(.+)", line.strip())
+            if m:
+                toc_titles.append(m.group(1).strip().lower())
+
+        if not toc_titles:
+            return list(research_data)
+
+        # Build lookup: normalised title -> section item
+        lookup: dict = {}
+        for item in research_data:
+            if isinstance(item, dict):
+                for key in item:
+                    lookup[key.strip().lower()] = item
+            elif isinstance(item, str):
+                lookup[item.strip()[:80].lower()] = item
+
+        ordered = []
+        used = set()
+        for title in toc_titles:
+            match = lookup.get(title)
+            if match is not None:
+                item_id = id(match)
+                if item_id not in used:
+                    ordered.append(match)
+                    used.add(item_id)
+
+        # Append any sections not matched by TOC
+        for item in research_data:
+            if id(item) not in used:
+                ordered.append(item)
+
+        return ordered
+
     async def write_sections(self, research_state: dict):
         query = research_state.get("title")
-        # Use indexed research data (with source IDs) if available, fallback to raw
-        data = research_state.get("indexed_research_data") or research_state.get("research_data")
+        data = truncate_research_data(
+            research_state.get("indexed_research_data") or research_state.get("research_data")
+        )
         has_source_index = bool(research_state.get("indexed_research_data"))
         task = research_state.get("task")
         follow_guidelines = task.get("follow_guidelines")
@@ -50,7 +172,10 @@ class WriterAgent:
             else ""
         )
         guidelines_block = (
-            f"You must follow the guidelines provided: {guidelines}"
+            f"You must follow the guidelines provided: {guidelines}\n"
+            "Additionally, apply these guidelines to the header values in the JSON output "
+            "(introduction, conclusion, sources keys must follow the guidelines). "
+            "Header string values must be plain text without markdown syntax."
             if follow_guidelines
             else ""
         )
@@ -78,13 +203,13 @@ class WriterAgent:
                 "role": "user",
                 "content": f"Today's date is {datetime.now().strftime('%d/%m/%Y')}\n."
                 f"Query or Topic: {query}\n"
-                f"Research data: {str(data)}\n"
+                f"Research data:\n{self._format_research_data(data)}\n"
                 f"{citation_instruction}"
                 f"Your task is to write an in depth, well written and detailed "
                 f"introduction and conclusion to the research report based on the provided research data. "
                 f"Do not include headers in the results.\n"
-                f"You MUST include any relevant sources to the introduction and conclusion as markdown hyperlinks -"
-                f"For example: 'This is a sample text. ([url website](url))'\n\n"
+                f"Cite all sources using numeric IDs placed directly after each claim, e.g. 'Jobs displaced by 2030[S1][S3].'\n"
+                f"Do NOT use inline markdown hyperlinks. All URLs belong in the 'sources' list only.\n\n"
                 f"{note_block}"
                 f"{guidelines_block}\n"
                 f"You MUST return nothing but a JSON in the following format (without json markdown):\n"
@@ -120,7 +245,7 @@ class WriterAgent:
         prompt = [
             {
                 "role": "system",
-                "content": """You are a research writer. 
+                "content": """You are a research writer.
 Your sole purpose is to revise the headers data based on the given guidelines.""",
             },
             {
@@ -166,38 +291,37 @@ Headers Data: {headers}\n
                 agent="WRITER",
             )
 
-        research_layout_content = await self.write_sections(research_state)
+        # Step 1: Generate TOC from per-section summaries
+        toc = await self._write_toc_from_summaries(research_state)
 
-        if research_state.get("task").get("verbose"):
+        # Step 2: Order sections by TOC, build final_draft body
+        research_data = research_state.get("research_data") or []
+        ordered_sections = self._order_sections_by_toc(toc, research_data)
+        sections_body = "\n\n".join(
+            "\n\n".join(str(v) for v in item.values() if v)
+            if isinstance(item, dict)
+            else str(item or "")
+            for item in ordered_sections
+        ).strip()
+
+        # Step 3: Generate intro + conclusion
+        layout_content = await self.write_sections(research_state)
+
+        if research_state.get("task", {}).get("verbose"):
             if self.websocket and self.stream_output:
-                research_layout_content_str = json.dumps(
-                    research_layout_content, indent=2
-                )
                 await self.stream_output(
                     "logs",
                     "research_layout_content",
-                    research_layout_content_str,
+                    json.dumps(layout_content, indent=2),
                     self.websocket,
                 )
             else:
-                print_agent_output(research_layout_content, agent="WRITER")
+                print_agent_output(layout_content, agent="WRITER")
 
         headers = self.get_headers(research_state)
-        if research_state.get("task").get("follow_guidelines"):
-            if self.websocket and self.stream_output:
-                await self.stream_output(
-                    "logs",
-                    "rewriting_layout",
-                    "Rewriting layout based on guidelines...",
-                    self.websocket,
-                )
-            else:
-                print_agent_output(
-                    "Rewriting layout based on guidelines...", agent="WRITER"
-                )
-            headers = await self.revise_headers(
-                task=research_state.get("task"), headers=headers
-            )
-            headers = headers.get("headers")
-
-        return {**research_layout_content, "headers": headers}
+        return {
+            **layout_content,
+            "table_of_contents": toc,
+            "sections_body": sections_body,
+            "headers": headers,
+        }

@@ -36,6 +36,7 @@ class _ReflexionEditor:
         start_from_section_node=None,
         section_state_before=None,
         note=None,
+        output_dir=None,
     ):
         self.calls.append(
             {

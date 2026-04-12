@@ -37,3 +37,4 @@ class ResearchState(TypedDict):
     # Opinions tracking
     review_opinions: Optional[list]   # serialized OpinionsStore records
     force_publish: Optional[bool]     # human requested early stop
+    section_summaries: Optional[List[str]]  # per-section summaries from SectionSynthesizer

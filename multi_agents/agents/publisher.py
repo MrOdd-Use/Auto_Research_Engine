@@ -45,43 +45,92 @@ class PublisherAgent:
             self.output_dir, layout, claim_report, source_index,
         )
 
+    @staticmethod
+    def _format_named_block(heading: str | None, body: object) -> str:
+        """Render a named markdown section when it has non-empty content."""
+        heading_text = str(heading or "").strip()
+        body_text = str(body or "").strip()
+
+        if not body_text:
+            return ""
+        if not heading_text:
+            return body_text
+        return f"## {heading_text}\n{body_text}"
+
+    @staticmethod
+    def _collect_sections_text(research_state: dict) -> str:
+        """Flatten the section payloads into the published report body."""
+        sections = []
+        for subheader in research_state.get("research_data", []):
+            if isinstance(subheader, dict):
+                for value in subheader.values():
+                    value_text = str(value or "").strip()
+                    if value_text:
+                        sections.append(value_text)
+            else:
+                value_text = str(subheader or "").strip()
+                if value_text:
+                    sections.append(value_text)
+        return "\n\n".join(sections)
+
     def generate_layout(self, research_state: dict):
         """Build the markdown layout for the final report."""
         final_draft = research_state.get("final_draft")
         if isinstance(final_draft, str) and final_draft.strip():
             return final_draft.strip()
 
-        sections = []
-        for subheader in research_state.get("research_data", []):
-            if isinstance(subheader, dict):
-                # Handle dictionary case
-                for key, value in subheader.items():
-                    sections.append(f"{value}")
-            else:
-                # Handle string case
-                sections.append(f"{subheader}")
-        
-        sections_text = '\n\n'.join(sections)
-        references = '\n'.join(f"{reference}" for reference in research_state.get("sources", []))
+        # Prefer TOC-ordered sections_body from WriterAgent; fall back to raw research_data
+        sections_body = research_state.get("sections_body")
+        if not sections_body:
+            sections_body = self._collect_sections_text(research_state)
+        references = "\n".join(
+            str(reference).strip()
+            for reference in research_state.get("sources", [])
+            if str(reference).strip()
+        )
         headers = research_state.get("headers", {})
-        layout = f"""# {headers.get('title')}
-#### {headers.get("date")}: {research_state.get('date')}
+        title = str(headers.get("title") or "").strip()
+        date_label = str(headers.get("date") or "").strip()
+        date_value = str(research_state.get("date") or "").strip()
 
-## {headers.get("introduction")}
-{research_state.get('introduction')}
+        blocks = []
+        if title:
+            blocks.append(f"# {title}")
+        if date_label and date_value:
+            blocks.append(f"#### {date_label}: {date_value}")
 
-## {headers.get("table_of_contents")}
-{research_state.get('table_of_contents')}
+        table_of_contents_block = self._format_named_block(
+            headers.get("table_of_contents"),
+            research_state.get("table_of_contents"),
+        )
+        if table_of_contents_block:
+            blocks.append(table_of_contents_block)
 
-{sections_text}
+        introduction_block = self._format_named_block(
+            headers.get("introduction"),
+            research_state.get("introduction"),
+        )
+        if introduction_block:
+            blocks.append(introduction_block)
 
-## {headers.get("conclusion")}
-{research_state.get('conclusion')}
+        if sections_body:
+            blocks.append(sections_body)
 
-## {headers.get("references")}
-{references}
-"""
-        return layout
+        conclusion_block = self._format_named_block(
+            headers.get("conclusion"),
+            research_state.get("conclusion"),
+        )
+        if conclusion_block:
+            blocks.append(conclusion_block)
+
+        references_block = self._format_named_block(
+            headers.get("references"),
+            references,
+        )
+        if references_block:
+            blocks.append(references_block)
+
+        return "\n\n".join(blocks)
 
     async def write_report_by_formats(self, layout: str, publish_formats: dict):
         """Write optional non-markdown export formats.

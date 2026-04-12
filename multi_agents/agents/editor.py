@@ -17,9 +17,11 @@ from ..memory.draft import DraftState
 from .researcher import ResearchAgent
 from .scraping import ScrapingAgent
 from .check_data import CheckDataAgent
+from .section_synthesizer import SectionSynthesizerAgent
 from .reviewer import ReviewerAgent
 from .reviser import ReviserAgent
 from multi_agents.workflow_session import WorkflowSessionRecorder
+from .utils.output_writers import write_section_draft_files
 
 
 _PLANNING_SYSTEM_PROMPT = (
@@ -134,6 +136,7 @@ class EditorAgent:
         start_from_section_node: str | None = None,
         section_state_before: Dict[str, Any] | None = None,
         note: str | None = None,
+        output_dir: str | None = None,
     ) -> Dict[str, Any]:
         """
         Execute parallel research tasks for each section.
@@ -163,6 +166,7 @@ class EditorAgent:
         existing_research_results = list(research_state.get("research_data") or [])
         existing_scraping_packets = list(research_state.get("scraping_packets") or [])
         existing_check_data_reports = list(research_state.get("check_data_reports") or [])
+        existing_section_evidences = list(research_state.get("section_evidences") or [])
 
         async def run_one_section(idx: int, section_detail: Dict[str, Any]) -> Dict[str, Any]:
             section_key = self._make_section_key(idx, section_detail.get("header", ""))
@@ -173,6 +177,7 @@ class EditorAgent:
                     "check_data_verdict": (
                         existing_check_data_reports[idx] if idx < len(existing_check_data_reports) else None
                     ),
+                    "section_evidence": existing_section_evidences[idx] if idx < len(existing_section_evidences) else None,
                 }
 
             task_input = (
@@ -197,9 +202,11 @@ class EditorAgent:
                 draft_state=task_input,
                 agents=agents,
                 section_index=idx,
+                section_key=section_key,
                 section_title=section_detail.get("header", ""),
                 session_recorder=session_recorder,
                 start_node=start_from_section_node if selected_section_key and section_key == selected_section_key else None,
+                output_dir=output_dir,
             )
 
         gathered_results = await asyncio.gather(
@@ -208,11 +215,15 @@ class EditorAgent:
         research_results = [result.get("draft") for result in gathered_results]
         scraping_packets = [result.get("scraping_packet") for result in gathered_results]
         check_data_reports = [result.get("check_data_verdict") for result in gathered_results]
+        section_evidences = [result.get("section_evidence") for result in gathered_results]
+        section_summaries = [result.get("section_summary") or "" for result in gathered_results]
 
         return {
             "research_data": research_results,
             "scraping_packets": scraping_packets,
             "check_data_reports": check_data_reports,
+            "section_evidences": section_evidences,
+            "section_summaries": section_summaries,
         }
 
     # ── Prompt Construction ───────────────────────────────────────────────
@@ -362,6 +373,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
             "research": ResearchAgent(self.websocket, self.stream_output, self.tone, self.headers),
             "scraping": ScrapingAgent(self.websocket, self.stream_output, self.tone, self.headers),
             "check_data": CheckDataAgent(self.websocket, self.stream_output, self.headers),
+            "section_synthesizer": SectionSynthesizerAgent(self.websocket, self.stream_output, self.headers),
             "reviewer": ReviewerAgent(self.websocket, self.stream_output, self.headers),
             "reviser": ReviserAgent(self.websocket, self.stream_output, self.headers),
         }
@@ -466,9 +478,11 @@ Return valid JSON only (no markdown fences) with this exact shape:
         draft_state: Dict[str, Any],
         agents: Dict[str, Any],
         section_index: int,
+        section_key: str,
         section_title: str,
         session_recorder: WorkflowSessionRecorder | None = None,
         start_node: str | None = None,
+        output_dir: str | None = None,
     ) -> Dict[str, Any]:
         state = copy.deepcopy(draft_state)
         node = start_node or "researcher"
@@ -500,6 +514,32 @@ Return valid JSON only (no markdown fences) with this exact shape:
                 if action == "retry":
                     node = "researcher"
                     continue
+                if action == "accept":
+                    state = await self._run_section_node(
+                        "section_synthesizer",
+                        agents["section_synthesizer"].run,
+                        state,
+                        section_index=section_index,
+                        section_title=section_title,
+                        session_recorder=session_recorder,
+                    )
+                    if output_dir:
+                        draft_item = state.get("draft")
+                        section_body = (
+                            "\n\n".join(str(v) for v in draft_item.values() if v)
+                            if isinstance(draft_item, dict)
+                            else str(draft_item or "")
+                        )
+                        await write_section_draft_files(
+                            output_dir=output_dir,
+                            chapter_num=section_index + 1,
+                            section_key=section_key,
+                            section_title=section_title,
+                            section_body=section_body,
+                            summary=state.get("section_summary") or "",
+                            section_evidence=state.get("section_evidence") or [],
+                            incremental_evidence=True,
+                        )
                 return state
 
             if node == "reviewer":
@@ -524,6 +564,22 @@ Return valid JSON only (no markdown fences) with this exact shape:
                 section_title=section_title,
                 session_recorder=session_recorder,
             )
+            if output_dir:
+                draft_item = state.get("draft")
+                section_body = (
+                    "\n\n".join(str(v) for v in draft_item.values() if v)
+                    if isinstance(draft_item, dict)
+                    else str(draft_item or "")
+                )
+                await write_section_draft_files(
+                    output_dir=output_dir,
+                    chapter_num=section_index + 1,
+                    section_key=section_key,
+                    section_title=section_title,
+                    section_body=section_body,
+                    summary=state.get("section_summary") or "",
+                    section_evidence=None,  # evidence unchanged on text-only revision
+                )
             node = "reviewer"
 
     async def _run_section_node(
@@ -536,7 +592,7 @@ Return valid JSON only (no markdown fences) with this exact shape:
         section_title: str,
         session_recorder: WorkflowSessionRecorder | None = None,
     ) -> Dict[str, Any]:
-        state_before = copy.deepcopy(state)
+        state_before = copy.deepcopy(state) if session_recorder is not None else None
         output_delta = await runner(state)
         state.update(output_delta or {})
         self._clear_section_note(state)

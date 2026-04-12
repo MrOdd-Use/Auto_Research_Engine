@@ -100,7 +100,7 @@ async def test_run_parallel_research_uses_fallback_section_when_empty(monkeypatc
 
     monkeypatch.setattr(agent, "_initialize_agents", lambda: {})
 
-    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_title, session_recorder=None, start_node=None):
+    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_key, section_title, session_recorder=None, start_node=None, output_dir=None):
         return {"draft": {"topic": draft_state.get("topic", "")}}
 
     monkeypatch.setattr(agent, "_run_section_workflow", fake_run_section_workflow)
@@ -122,7 +122,7 @@ async def test_run_parallel_research_collects_scraping_packets(monkeypatch):
 
     monkeypatch.setattr(agent, "_initialize_agents", lambda: {})
 
-    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_title, session_recorder=None, start_node=None):
+    async def fake_run_section_workflow(*, draft_state, agents, section_index, section_key, section_title, session_recorder=None, start_node=None, output_dir=None):
         return {
             "draft": {"topic": draft_state.get("topic", "")},
             "scraping_packet": {

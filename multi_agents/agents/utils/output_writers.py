@@ -290,3 +290,231 @@ def _source_sort_key(key: str) -> int:
         except ValueError:
             return 0
     return 0
+
+
+# ── Writer Draft Snapshot ────────────────────────────────────────────────
+
+
+def format_writer_draft_md(
+    layout: str,
+    claim_annotations: List[Dict[str, Any]],
+) -> str:
+    """Format initial writer draft with claim annotations summary."""
+    lines = [
+        "# Writer Initial Draft\n",
+        "_Snapshot taken immediately after writer node, before review/revision._\n",
+        layout,
+    ]
+
+    if claim_annotations:
+        cited = [c for c in claim_annotations if c.get("source_ids")]
+        uncited = [c for c in claim_annotations if not c.get("source_ids")]
+        lines.append("\n\n---\n\n## Claim Annotations\n")
+        lines.append(
+            f"**Total**: {len(claim_annotations)} | "
+            f"**Cited**: {len(cited)} | "
+            f"**Uncited**: {len(uncited)}\n"
+        )
+        for item in claim_annotations:
+            ids = "".join(f"[{s}]" for s in (item.get("source_ids") or []))
+            section = item.get("section") or ""
+            sentence = str(item.get("sentence") or "").strip()
+            tag = ids if ids else "[no source]"
+            lines.append(f"- {tag} _{section}_ — {sentence[:120]}")
+
+    return "\n".join(lines)
+
+
+async def write_writer_draft_snapshot(
+    output_dir: str,
+    layout: str,
+    claim_annotations: List[Dict[str, Any]],
+) -> None:
+    """Write drafts/writer_initial_draft.md to output_dir."""
+    import os
+    drafts_dir = os.path.join(output_dir, "drafts")
+    os.makedirs(drafts_dir, exist_ok=True)
+    path = os.path.join(drafts_dir, "writer_initial_draft.md")
+    content = format_writer_draft_md(layout, claim_annotations)
+    async with aiofiles.open(path, "w", encoding="utf-8") as f:
+        await f.write(content)
+
+
+
+# ── Section Draft Files ──────────────────────────────────────────────────
+
+
+def _build_chapter_citation_map(chapter_num: int, section_evidence: List[dict]) -> Dict[str, str]:
+    """Build {global_id: "[chapter.index]"} mapping from a section's evidence list.
+
+    Only entries with a global_id are included (i.e. after remap).
+    """
+    result: Dict[str, str] = {}
+    for idx, entry in enumerate(section_evidence or [], start=1):
+        if not isinstance(entry, dict):
+            continue
+        global_id = str(entry.get("global_id") or "").strip()
+        if global_id:
+            result[global_id] = f"[{chapter_num}.{idx}]"
+    return result
+
+
+def convert_to_chapter_citations(text: str, citation_map: Dict[str, str]) -> str:
+    """Replace [Sx] markers with [chapter.index] using the provided map."""
+    if not citation_map:
+        return text
+
+    def replacer(match: re.Match) -> str:
+        key = f"S{match.group(1)}"
+        return citation_map.get(key, match.group(0))
+
+    return re.sub(r"\[S(\d+)\]", replacer, text)
+
+
+def _extract_section_body_text(research_data_item: Any) -> str:
+    """Extract plain body text from a research_data dict item."""
+    if isinstance(research_data_item, dict):
+        return "\n\n".join(str(v) for v in research_data_item.values() if v)
+    return str(research_data_item or "")
+
+
+def extract_section_summary_fallback(section_body: str) -> str:
+    """Fallback: skip ### header line, return first non-empty paragraph."""
+    paragraphs = re.split(r"\n{2,}", section_body.strip())
+    for para in paragraphs:
+        stripped = para.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped[:400]
+    return ""
+
+
+def format_section_content_draft(
+    section_title: str,
+    section_body: str,
+    citation_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """Render content.md for a section draft."""
+    body = convert_to_chapter_citations(section_body, citation_map or {})
+    return f"# {section_title}\n\n{body}\n"
+
+
+def format_section_summary_draft(section_title: str, summary: str) -> str:
+    """Render summary.md for a section draft."""
+    return f"# Summary: {section_title}\n\n{summary}\n"
+
+
+def format_section_evidence_draft(
+    chapter_num: int,
+    section_title: str,
+    section_evidence: List[dict],
+) -> str:
+    """Render evidence.md with [chapter.index] citation labels."""
+    if not section_evidence:
+        return f"# Evidence: {section_title}\n\n_No evidence collected for this section._\n"
+    lines = [f"# Evidence: {section_title}\n"]
+    for idx, entry in enumerate(section_evidence, start=1):
+        if not isinstance(entry, dict):
+            continue
+        used = entry.get("used_in_draft", False)
+        source_url = entry.get("source_url") or ""
+        domain = entry.get("domain") or ""
+        content = entry.get("content") or ""
+        label = f"{chapter_num}.{idx}"
+        lines.append(f"### [{label}] ({'cited' if used else 'unused'})")
+        lines.append(f"- **URL**: {source_url}")
+        lines.append(f"- **Domain**: {domain}")
+        lines.append(f"- **Content**: {content}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _merge_evidence(existing: List[dict], incoming: List[dict]) -> List[dict]:
+    """Merge incoming evidence into existing, deduplicating by URL+content fingerprint."""
+    seen: set = set()
+    merged: List[dict] = []
+    for entry in existing:
+        if not isinstance(entry, dict):
+            continue
+        fp = f"{entry.get('source_url', '')}||{entry.get('content', '')}"
+        if fp not in seen:
+            seen.add(fp)
+            merged.append(entry)
+    for entry in incoming:
+        if not isinstance(entry, dict):
+            continue
+        fp = f"{entry.get('source_url', '')}||{entry.get('content', '')}"
+        if fp not in seen:
+            seen.add(fp)
+            merged.append(entry)
+    return merged
+
+
+def _parse_evidence_from_md(md_text: str) -> List[dict]:
+    """Parse existing evidence.md back into a list of dicts (URL + content only)."""
+    entries: List[dict] = []
+    current: Dict[str, str] = {}
+    for line in md_text.splitlines():
+        if line.startswith("### ["):
+            if current:
+                entries.append(current)
+            current = {}
+        elif line.startswith("- **URL**:"):
+            current["source_url"] = line[len("- **URL**:"):].strip()
+        elif line.startswith("- **Domain**:"):
+            current["domain"] = line[len("- **Domain**:"):].strip()
+        elif line.startswith("- **Content**:"):
+            current["content"] = line[len("- **Content**:"):].strip()
+    if current:
+        entries.append(current)
+    return entries
+
+
+async def write_section_draft_files(
+    output_dir: str,
+    chapter_num: int,
+    section_key: str,
+    section_title: str,
+    section_body: str,
+    summary: str,
+    section_evidence: Optional[List[dict]],
+    citation_map: Optional[Dict[str, str]] = None,
+    incremental_evidence: bool = False,
+) -> None:
+    """Write drafts/{section_key}/content.md, summary.md, and evidence.md.
+
+    Args:
+        section_evidence: Pass None to skip rewriting evidence.md.
+        incremental_evidence: If True and evidence.md exists, merge new entries
+            with existing ones (dedup by URL+content) before writing.
+    """
+    import os
+    section_dir = os.path.join(output_dir, "drafts", section_key)
+    os.makedirs(section_dir, exist_ok=True)
+
+    # content.md
+    content_text = format_section_content_draft(section_title, section_body, citation_map)
+    async with aiofiles.open(os.path.join(section_dir, "content.md"), "w", encoding="utf-8") as f:
+        await f.write(content_text)
+
+    # summary.md
+    if not summary:
+        summary = extract_section_summary_fallback(section_body)
+    summary_text = format_section_summary_draft(section_title, summary)
+    async with aiofiles.open(os.path.join(section_dir, "summary.md"), "w", encoding="utf-8") as f:
+        await f.write(summary_text)
+
+    # evidence.md — skip if section_evidence is None
+    if section_evidence is None:
+        return
+
+    evidence_path = os.path.join(section_dir, "evidence.md")
+    final_evidence = section_evidence
+    if incremental_evidence and os.path.exists(evidence_path):
+        async with aiofiles.open(evidence_path, "r", encoding="utf-8") as f:
+            existing_md = await f.read()
+        existing = _parse_evidence_from_md(existing_md)
+        final_evidence = _merge_evidence(existing, section_evidence)
+
+    evidence_text = format_section_evidence_draft(chapter_num, section_title, final_evidence)
+    async with aiofiles.open(evidence_path, "w", encoding="utf-8") as f:
+        await f.write(evidence_text)

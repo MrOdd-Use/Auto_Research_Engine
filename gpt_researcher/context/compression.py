@@ -232,3 +232,37 @@ class WrittenContentCompressor:
             cost_callback(estimate_embedding_cost(model=OPENAI_EMBEDDING_MODEL, docs=self.documents))
         relevant_docs = await asyncio.to_thread(compressed_docs.invoke, query, **self.kwargs)
         return self.__pretty_docs_list(relevant_docs, max_results)
+
+
+def truncate_research_data(
+    items: list,
+    max_total_chars: int = 60_000,
+    max_item_chars: int = 8_000,
+) -> list:
+    """Truncate research data items to fit within context limits.
+
+    Each item is capped at max_item_chars; total across all items
+    is capped at max_total_chars. Truncated items are suffixed with
+    '... [truncated]'.
+    """
+    result = []
+    total = 0
+    for item in (items or []):
+        if total >= max_total_chars:
+            break
+        if isinstance(item, dict):
+            capped = {}
+            for k, v in item.items():
+                text = str(v)
+                if len(text) > max_item_chars:
+                    text = text[:max_item_chars] + "... [truncated]"
+                capped[k] = text
+            result.append(capped)
+            total += sum(len(v) for v in capped.values())
+        elif isinstance(item, str):
+            text = item
+            if len(text) > max_item_chars:
+                text = text[:max_item_chars] + "... [truncated]"
+            result.append(text)
+            total += len(text)
+    return result

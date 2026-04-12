@@ -75,6 +75,16 @@ class _NoopSectionReviser:
         return {"draft": draft_state.get("draft"), "revision_notes": "n/a"}
 
 
+class _NoopSectionSynthesizer:
+    async def run(self, draft_state):
+        topic = str(draft_state.get("topic") or "")
+        return {
+            "draft": {topic: f"### {topic}\n\nSynthesized content."},
+            "section_evidence": [],
+            "section_summary": f"Summary of {topic}.",
+        }
+
+
 class _CheckpointEditorAgent(EditorAgent):
     def __init__(self, section_titles):
         super().__init__(None, None, None, {})
@@ -105,6 +115,7 @@ class _CheckpointEditorAgent(EditorAgent):
             "research": None,
             "scraping": self.scraping_agent,
             "check_data": self.check_data_agent,
+            "section_synthesizer": _NoopSectionSynthesizer(),
             "reviewer": _NoopSectionReviewer(),
             "reviser": _NoopSectionReviser(),
         }
