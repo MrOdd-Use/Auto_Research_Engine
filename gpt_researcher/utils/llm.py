@@ -70,7 +70,7 @@ async def create_chat_completion(
         str: The response from the chat completion.
     """
     # validate input
-    if model is None:
+    if model is None and not route_context:
         raise ValueError("Model cannot be None")
     if max_tokens is not None and max_tokens > 32001:
         raise ValueError(

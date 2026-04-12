@@ -16,6 +16,13 @@ def _is_soft_error(exc: BaseException) -> bool:
     msg = str(exc)
     return "503" in msg or "service_busy" in msg.lower() or "service unavailable" in msg.lower()
 
+
+def _is_context_exceeded_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "context_length_exceeded" in msg or "context_window" in msg or (
+        "422" in msg and "context" in msg
+    )
+
 from .client import RouteAgentClient
 from .utils.context import current_route_scope
 from .utils.model_utils import build_model_identifier
@@ -249,7 +256,7 @@ class RoutedLLMInvoker:
                     str(exc),
                     hard_unavailable=self._is_hard_unavailable_error(exc),
                 )
-                if _is_quota_error(exc) and queue:
+                if (_is_quota_error(exc) or _is_context_exceeded_error(exc)) and queue:
                     self._emit(
                         {
                             "type": "quota_fallback",
@@ -584,11 +591,12 @@ class RoutedLLMInvoker:
                 is_quota = _is_quota_error(exc)
                 is_hard = self._is_hard_unavailable_error(exc)
                 is_soft = _is_soft_error(exc)
+                is_ctx = _is_context_exceeded_error(exc)
 
-                if is_last or (not is_quota and not is_hard and not is_soft):
+                if is_last or (not is_quota and not is_hard and not is_soft and not is_ctx):
                     raise
 
-                # quota / hard-unavailable（400）/ soft（503）→ fallback 到下一候选
+                # quota / hard-unavailable（400）/ soft（503）/ context_exceeded（422）→ fallback 到下一候选
                 self.client.record_execution_failure(
                     "",
                     decision.resolved_shared_agent_class,

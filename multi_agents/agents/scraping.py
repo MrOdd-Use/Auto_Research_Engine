@@ -975,6 +975,7 @@ class ScrapingAgent:
                     "content": passage["content"],
                     "source_url": passage["source_url"],
                     "metadata": passage.get("metadata") or {},
+                    "relevance_score": round(float(relevance[idx]), 4),
                 }
             )
         return top_passages[:top_k]
@@ -1082,6 +1083,7 @@ class ScrapingAgent:
                     "content": passage["content"],
                     "source_url": passage["source_url"],
                     "metadata": passage.get("metadata") or {},
+                    "relevance_score": round(float(relevance[idx]), 4),
                 }
             )
         return top_passages
@@ -1109,6 +1111,7 @@ class ScrapingAgent:
                     "content": content,
                     "source_url": passages[idx]["source_url"],
                     "metadata": passages[idx].get("metadata") or {},
+                    "relevance_score": round(float(relevance[idx]), 4),
                 }
             )
             if len(result) >= top_k:

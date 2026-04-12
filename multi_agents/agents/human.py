@@ -185,6 +185,62 @@ class HumanAgent:
             return None
         return cleaned
 
+    async def review_writer_draft(
+        self,
+        draft_layout: str,
+        claim_annotations: list,
+        task: dict,
+    ) -> dict:
+        """Interactive breakpoint after writer node.
+
+        Returns:
+            {"force_publish": bool, "reviewer_note": str | None}
+        """
+        if not task.get("include_writer_review"):
+            return {"force_publish": False, "reviewer_note": None}
+
+        cited = sum(1 for c in claim_annotations if c.get("source_ids"))
+        total = len(claim_annotations)
+        summary = f"{total} claims — {cited} cited, {total - cited} uncited."
+
+        preview = draft_layout[:3000] + ("\n...[truncated]" if len(draft_layout) > 3000 else "")
+        display = (
+            f"[Writer Breakpoint] Draft complete. {summary}\n\n"
+            f"{'-' * 60}\n{preview}\n{'-' * 60}\n\n"
+            "Enter / 'no' → continue to review\n"
+            "'stop'       → skip review, publish now\n"
+            "Any text     → pass as instructions to reviewer\n"
+        )
+
+        if self.websocket and self.stream_output:
+            try:
+                await self.stream_output(
+                    "human_feedback", "writer_draft_review", display, self.websocket
+                )
+                raw = await self._receive_feedback()
+            except Exception as e:
+                print(f"Error receiving writer draft feedback: {e}", flush=True)
+                return {"force_publish": False, "reviewer_note": None}
+        else:
+            print(f"\n{display}\n", flush=True)
+            raw = input(">> ").strip()
+
+        normalized = self._normalize_feedback(raw)
+        if normalized is None:
+            return {"force_publish": False, "reviewer_note": None}
+
+        if normalized.lower() in _STOP_WORDS:
+            msg = "[Writer Breakpoint] Stop signal — skipping review cycle."
+            if self.websocket and self.stream_output:
+                await self.stream_output(
+                    "human_feedback", "writer_force_publish", msg, self.websocket
+                )
+            else:
+                print(f"\n{msg}\n", flush=True)
+            return {"force_publish": True, "reviewer_note": None}
+
+        return {"force_publish": False, "reviewer_note": normalized}
+
     async def collect_review_feedback(
         self, review_text: str, draft_text: str, task: dict
     ) -> tuple:

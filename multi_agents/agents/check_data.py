@@ -262,11 +262,14 @@ class CheckDataAgent:
         return ""
 
     def _extract_negative_constraints(self, topic: str) -> List[str]:
-        negatives = []
-        for year in ("2024", "2025"):
-            if year not in topic:
-                negatives.append(year)
-        negatives.extend(["projection", "forecast"])
+        negatives = ["projection", "forecast"]
+        # Exclude years that are near-past but not the target year
+        year_match = re.search(r"20\d{2}", topic)
+        if year_match:
+            target_year = int(year_match.group())
+            for candidate in (target_year - 1, target_year - 2):
+                if str(candidate) not in topic:
+                    negatives.append(str(candidate))
         return negatives
 
     def _constraint_guard(self, claims: dict, segments: List[str]) -> dict:
@@ -510,7 +513,15 @@ class CheckDataAgent:
             keypoint_coverage = 1.0
             uncovered_key_points = []
         else:
-            uncovered_key_points = [point for point in key_points if point.lower() not in corpus_text]
+            corpus_tokens = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", corpus_text))
+            uncovered_key_points = []
+            for point in key_points:
+                point_tokens = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", point.lower()))
+                if not point_tokens:
+                    continue
+                overlap = len(point_tokens & corpus_tokens) / len(point_tokens)
+                if overlap < 0.4:
+                    uncovered_key_points.append(point)
             keypoint_coverage = (len(key_points) - len(uncovered_key_points)) / len(key_points)
 
         if query_total == 0 and len(key_points) == 0:

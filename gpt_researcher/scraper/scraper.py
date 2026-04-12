@@ -93,68 +93,68 @@ class Scraper:
                     f"`pip install -U {pkg_inst_name}`"
                 )
 
+    def _get_scraper_chain(self, link):
+        """Return ordered list of scraper classes to try for this link."""
+        if link.endswith(".pdf"):
+            return [PyMuPDFScraper]
+        if "arxiv.org" in link:
+            return [ArxivScraper]
+
+        scraper_map = {
+            "bs": BeautifulSoupScraper,
+            "web_base_loader": WebBaseLoaderScraper,
+            "browser": BrowserScraper,
+            "nodriver": NoDriverScraper,
+            "tavily_extract": TavilyExtract,
+            "firecrawl": FireCrawl,
+        }
+        primary = scraper_map.get(self.scraper)
+        if primary is None:
+            raise Exception(f"Scraper not found: {self.scraper}")
+
+        if self.scraper == "bs":
+            return [primary, NoDriverScraper]
+        return [primary]
+
     async def extract_data_from_url(self, link, session):
-        """
-        Extracts the data from the link with logging
-        """
+        """Extracts the data from the link, with fallback scraper chain."""
         async with self.worker_pool.throttle():
-            try:
-                Scraper = self.get_scraper(link)
-                scraper = Scraper(link, session)
+            scraper_classes = self._get_scraper_chain(link)
+            last_result = {"url": link, "raw_content": None, "image_urls": [], "title": ""}
 
-                # Get scraper name
-                scraper_name = scraper.__class__.__name__
-                self.logger.info(f"\n=== Using {scraper_name} ===")
+            for ScraperClass in scraper_classes:
+                try:
+                    scraper = ScraperClass(link, session)
+                    scraper_name = scraper.__class__.__name__
+                    self.logger.info(f"\n=== Using {scraper_name} ===")
 
-                # Get content
-                if hasattr(scraper, "scrape_async"):
-                    content, image_urls, title = await scraper.scrape_async()
-                else:
-                    (
-                        content,
-                        image_urls,
-                        title,
-                    ) = await asyncio.get_running_loop().run_in_executor(
-                        self.worker_pool.executor, scraper.scrape
-                    )
+                    if hasattr(scraper, "scrape_async"):
+                        content, image_urls, title = await scraper.scrape_async()
+                    else:
+                        content, image_urls, title = await asyncio.get_running_loop().run_in_executor(
+                            self.worker_pool.executor, scraper.scrape
+                        )
 
-                if len(content) < 100:
-                    self.logger.warning(f"Content too short or empty for {link}")
-                    return {
-                        "url": link,
-                        "raw_content": None,
-                        "image_urls": [],
-                        "title": title,
-                    }
+                    if not content or len(content) < 100:
+                        self.logger.warning(
+                            f"Content too short or empty for {link} (scraper: {scraper_name})"
+                        )
+                        last_result = {"url": link, "raw_content": None, "image_urls": [], "title": title}
+                        continue
 
-                # Log results
-                self.logger.info(f"\nTitle: {title}")
-                self.logger.info(
-                    f"Content length: {len(content) if content else 0} characters"
-                )
-                self.logger.info(f"Number of images: {len(image_urls)}")
-                self.logger.info(f"URL: {link}")
-                self.logger.info("=" * 50)
+                    self.logger.info(f"\nTitle: {title}")
+                    self.logger.info(f"Content length: {len(content)} characters")
+                    self.logger.info(f"Number of images: {len(image_urls)}")
+                    self.logger.info(f"URL: {link}")
+                    self.logger.info("=" * 50)
 
-                if not content or len(content) < 100:
-                    self.logger.warning(f"Content too short or empty for {link}")
-                    return {
-                        "url": link,
-                        "raw_content": None,
-                        "image_urls": [],
-                        "title": title,
-                    }
+                    return {"url": link, "raw_content": content, "image_urls": image_urls, "title": title}
 
-                return {
-                    "url": link,
-                    "raw_content": content,
-                    "image_urls": image_urls,
-                    "title": title,
-                }
+                except Exception as e:
+                    self.logger.error(f"Error processing {link} with {ScraperClass.__name__}: {str(e)}")
+                    last_result = {"url": link, "raw_content": None, "image_urls": [], "title": ""}
 
-            except Exception as e:
-                self.logger.error(f"Error processing {link}: {str(e)}")
-                return {"url": link, "raw_content": None, "image_urls": [], "title": ""}
+            return last_result
 
     def get_scraper(self, link):
         """

@@ -16,3 +16,4 @@ class DraftState(TypedDict):
     draft: dict
     review: str
     revision_notes: str
+    section_evidence: Optional[list]

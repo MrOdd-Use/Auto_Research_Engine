@@ -74,7 +74,7 @@ class NoDriverScraper:
                 if cast(
                     bool,
                     await page.evaluate(
-                        "window.innerHeight + window.scrollY >= document.scrollingElement.scrollHeight"
+                        "window.innerHeight + window.scrollY >= (document.scrollingElement || document.body || {scrollHeight: 0}).scrollHeight"
                     ),
                 ):
                     break
